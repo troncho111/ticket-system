@@ -19,7 +19,59 @@ ACCOUNTING_EMAIL = "operations@tiktik.co.il"
 OPERATIONS_EMAIL = "operations@tiktik.co.il"
 
 def get_resend_credentials():
-    """Get Resend API credentials from Replit connector"""
+    """Get Resend API credentials from Streamlit Secrets, environment variables, or Replit connector"""
+    # Method 1: Try Streamlit Secrets first (for Streamlit Cloud)
+    try:
+        if hasattr(st, 'secrets'):
+            # Try different ways to access secrets
+            api_key = None
+            from_email = None
+            
+            # Method 1a: Direct access with []
+            try:
+                if 'RESEND_API_KEY' in st.secrets:
+                    api_key = st.secrets['RESEND_API_KEY']
+                if 'RESEND_FROM_EMAIL' in st.secrets:
+                    from_email = st.secrets['RESEND_FROM_EMAIL']
+            except:
+                pass
+            
+            # Method 1b: Try getattr (safer)
+            if not api_key:
+                try:
+                    api_key = getattr(st.secrets, 'RESEND_API_KEY', None)
+                except:
+                    pass
+            
+            if not from_email:
+                try:
+                    from_email = getattr(st.secrets, 'RESEND_FROM_EMAIL', None)
+                except:
+                    pass
+            
+            # Method 1c: Try .get() method if available
+            if not api_key and hasattr(st.secrets, 'get'):
+                try:
+                    api_key = st.secrets.get('RESEND_API_KEY')
+                    from_email = st.secrets.get('RESEND_FROM_EMAIL')
+                except:
+                    pass
+            
+            if api_key and from_email:
+                return api_key, from_email
+    except Exception as e:
+        pass  # Fall through to other methods
+    
+    # Method 2: Try environment variables (fallback)
+    try:
+        api_key = os.environ.get('RESEND_API_KEY')
+        from_email = os.environ.get('RESEND_FROM_EMAIL')
+        if api_key and from_email:
+            return api_key, from_email
+    except Exception as e:
+        pass  # Fall through to Replit connector method
+    
+    # Method 3: Fallback to Replit connector (for Replit deployments)
     try:
         hostname = os.environ.get('REPLIT_CONNECTORS_HOSTNAME')
         x_replit_token = None
@@ -45,7 +97,7 @@ def get_resend_credentials():
         
         return settings.get('api_key'), settings.get('from_email')
     except Exception as e:
-        st.error(f"Error getting Resend credentials: {e}")
+        # Don't show error if it's just missing Replit credentials (expected on Streamlit Cloud)
         return None, None
 
 def send_payment_collection_email(orders_data):
@@ -53,7 +105,13 @@ def send_payment_collection_email(orders_data):
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו הגדרות Resend"
+        error_msg = (
+            "לא נמצאו הגדרות Resend.\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
     
     resend.api_key = api_key
     
@@ -117,7 +175,13 @@ def send_not_paid_email(orders_data):
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו הגדרות Resend"
+        error_msg = (
+            "לא נמצאו הגדרות Resend.\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
     
     resend.api_key = api_key
     
@@ -190,7 +254,13 @@ def send_payment_confirmation_email(orders_data, payment_method, attachment_data
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו הגדרות Resend"
+        error_msg = (
+            "לא נמצאו הגדרות Resend.\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
     
     resend.api_key = api_key
     
@@ -273,7 +343,44 @@ def send_new_orders_report_email(orders_df, to_email):
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו פרטי התחברות ל-Resend"
+        # Try to get diagnostic info
+        diagnostic_info = ""
+        try:
+            if hasattr(st, 'secrets'):
+                available_keys = []
+                try:
+                    # Try to list available keys
+                    if hasattr(st.secrets, 'keys'):
+                        available_keys = list(st.secrets.keys())
+                    elif hasattr(st.secrets, '__dict__'):
+                        available_keys = list(st.secrets.__dict__.keys())
+                except:
+                    pass
+                
+                if available_keys:
+                    diagnostic_info = f"\n\n**מפתחות זמינים ב-Secrets:** {', '.join(available_keys[:10])}"
+                else:
+                    diagnostic_info = "\n\n**הערה:** לא נמצאו מפתחות ב-Secrets"
+        except:
+            pass
+        
+        error_msg = (
+            "❌ **לא נמצאו פרטי התחברות ל-Resend**\n\n"
+            "💡 **פתרון:**\n"
+            "1. לך ל-Streamlit Cloud Dashboard\n"
+            "2. בחר את האפליקציה שלך\n"
+            "3. לך ל-Settings > Secrets\n"
+            "4. הוסף את השורות הבאות:\n\n"
+            "```toml\n"
+            "RESEND_API_KEY = \"re_LkgCCYuK_PP7PkrLaWhA4A4qNQ3b9yVFq\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\"\n"
+            "```\n\n"
+            "5. **חשוב:** ודא שאין רווחים מיותרים או תווים מיוחדים\n"
+            "6. שמור את ה-Secrets\n"
+            "7. הפעל מחדש את האפליקציה (או לחץ על \"🔄 רענן נתונים\")"
+            f"{diagnostic_info}"
+        )
+        return False, error_msg
     
     if orders_df.empty:
         return False, "אין הזמנות חדשות לשלוח"
@@ -538,7 +645,13 @@ def send_daily_sales_report_email(orders_df, to_email, report_date=None):
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו פרטי התחברות ל-Resend"
+        error_msg = (
+            "לא נמצאו פרטי התחברות ל-Resend.\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
     
     resend.api_key = api_key
     
@@ -719,7 +832,13 @@ def send_weekly_sales_report_email(orders_df, to_email, week_start_date=None, we
     api_key, from_email = get_resend_credentials()
     
     if not api_key or not from_email:
-        return False, "לא נמצאו פרטי התחברות ל-Resend"
+        error_msg = (
+            "לא נמצאו פרטי התחברות ל-Resend.\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
     
     resend.api_key = api_key
     
@@ -3790,7 +3909,47 @@ if df.empty:
         
         st.markdown("---")
         
-        # 4. Summary
+        # 4. Check Resend credentials
+        st.subheader("4️⃣ בדיקת פרטי Resend")
+        try:
+            if hasattr(st, 'secrets'):
+                # Check if Resend secrets exist
+                has_resend_key = 'RESEND_API_KEY' in st.secrets
+                has_resend_email = 'RESEND_FROM_EMAIL' in st.secrets
+                
+                if has_resend_key and has_resend_email:
+                    api_key = st.secrets.get('RESEND_API_KEY', '') or getattr(st.secrets, 'RESEND_API_KEY', '')
+                    from_email = st.secrets.get('RESEND_FROM_EMAIL', '') or getattr(st.secrets, 'RESEND_FROM_EMAIL', '')
+                    
+                    if api_key and from_email:
+                        # Mask the API key for security
+                        masked_key = api_key[:10] + "..." + api_key[-4:] if len(api_key) > 14 else "***"
+                        st.success(f"✅ **Resend credentials נמצאו**")
+                        st.info(f"**API Key:** `{masked_key}`\n**From Email:** `{from_email}`")
+                        diagnostic_results['resend'] = True
+                    else:
+                        st.warning("⚠️ **Resend credentials נמצאו אבל ריקים**")
+                        st.info("ודא שה-RESEND_API_KEY ו-RESEND_FROM_EMAIL מכילים ערכים")
+                        diagnostic_results['resend'] = False
+                else:
+                    missing = []
+                    if not has_resend_key:
+                        missing.append("RESEND_API_KEY")
+                    if not has_resend_email:
+                        missing.append("RESEND_FROM_EMAIL")
+                    st.error(f"❌ **חסרים פרטי Resend:** {', '.join(missing)}")
+                    st.info("💡 **פתרון:** הוסף ב-Streamlit Secrets:\n```toml\nRESEND_API_KEY = \"re_...\"\nRESEND_FROM_EMAIL = \"info@tiktik.co.il\"\n```")
+                    diagnostic_results['resend'] = False
+            else:
+                st.warning("⚠️ **לא ניתן לגשת ל-Streamlit Secrets**")
+                diagnostic_results['resend'] = False
+        except Exception as e:
+            st.error(f"❌ **שגיאה בבדיקת Resend:** {str(e)}")
+            diagnostic_results['resend'] = False
+        
+        st.markdown("---")
+        
+        # 5. Summary
         st.subheader("📋 סיכום אבחון")
         all_ok = all(diagnostic_results.values()) if diagnostic_results else False
         
@@ -3804,7 +3963,8 @@ if df.empty:
                     'credentials': 'משתנה הסביבה GOOGLE_CREDENTIALS',
                     'sheet_name': 'שם הגיליון',
                     'connection': 'חיבור ל-Google Sheets',
-                    'permissions': 'הרשאות לגיליון'
+                    'permissions': 'הרשאות לגיליון',
+                    'resend': 'פרטי Resend'
                 }
                 st.write(f"{icon} {check_names.get(check, check)}: {'תקין' if status else 'בעיה'}")
     
