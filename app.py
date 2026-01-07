@@ -3205,6 +3205,12 @@ with st.sidebar:
         st.cache_data.clear()
         if 'sheet_error' in st.session_state:
             del st.session_state.sheet_error
+        st.session_state.needs_data_refresh = True
+        # Clear cached data
+        if 'main_df' in st.session_state:
+            del st.session_state.main_df
+        if 'df_has_supplier_data' in st.session_state:
+            del st.session_state.df_has_supplier_data
         st.rerun()
     
     if st.button(t("auto_update_btn"), use_container_width=True):
@@ -3536,7 +3542,13 @@ with st.sidebar:
     st.markdown("---")
     st.subheader(t("filters"))
     
-    df = load_data_from_sheet()
+    # Cache df in session_state to prevent reload on every rerun
+    if 'main_df' not in st.session_state or st.session_state.get('needs_data_refresh', False):
+        with st.spinner("טוען נתונים..."):
+            st.session_state.main_df = load_data_from_sheet()
+            st.session_state.needs_data_refresh = False
+    
+    df = st.session_state.main_df
     
     # Initialize filter session state
     if 'filter_events' not in st.session_state:
