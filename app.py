@@ -6336,14 +6336,9 @@ with tab4:
                 row_idx = order.get('row_index', None)
                 category = order.get('Category / Section', '-')
                 
-                is_ordered = current_status.lower() == 'orderd'
-                
-                # Use unique key for each container to prevent unnecessary rerenders
-                container_key = f"order_container_{order_num}_{idx}"
-                if container_key not in st.session_state[container_cache_key]:
-                    st.session_state[container_cache_key][container_key] = st.empty()
-                
-                with st.container(border=True):
+                    is_ordered = current_status.lower() == 'orderd'
+                    
+                    with st.container(border=True):
                     if is_ordered:
                         st.markdown("""
                         <style>
