@@ -1353,17 +1353,105 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
+    # Try to get from Streamlit secrets first (if available)
+    creds_json = None
+    try:
+        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
+            creds_json = st.secrets['GOOGLE_CREDENTIALS']
+    except:
+        pass
+    
+    # Fallback to environment variable
+    if not creds_json:
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
     if not creds_json:
         raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
     
+    # Handle different input formats
     try:
-        if isinstance(creds_json, str):
+        if isinstance(creds_json, dict):
+            # Already a dictionary (from Streamlit secrets)
+            creds_dict = creds_json
+        elif isinstance(creds_json, str):
+            # Parse JSON string
             creds_dict = json.loads(creds_json)
         else:
+            # Try to convert to dict
             creds_dict = dict(creds_json)
+        
+        # Ensure private_key is properly formatted (handle escaped newlines)
+        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
+            private_key = creds_dict['private_key']
+            original_key = private_key  # Keep original for debugging
+            
+            # Handle escaped newlines - this is the most common issue
+            # The private_key in JSON is often stored with escaped newlines (\n as string)
+            # We need to convert them to actual newline characters
+            
+            # Method 1: Simple replace of \\n with \n
+            # This handles the case where JSON has "\\n" as a string
+            if '\\n' in private_key:
+                # Count how many backslashes before 'n'
+                # If it's \\n (two backslashes + n), replace with actual newline
+                # If it's \n (one backslash + n), it's already escaped, replace with newline
+                private_key = private_key.replace('\\n', '\n')
+            
+            # Method 2: Handle double-escaped (\\\\n becomes \n)
+            import re
+            # Replace any number of backslashes followed by 'n' with actual newline
+            # But be careful - we already did the simple replace above
+            # So now we only need to handle cases with more backslashes
+            private_key = re.sub(r'\\{2,}n', '\n', private_key)
+            
+            # Ensure the key has proper BEGIN/END markers
+            if '-----BEGIN PRIVATE KEY-----' not in private_key:
+                # Check if it has the markers but maybe with different spacing
+                if 'BEGIN PRIVATE KEY' in private_key:
+                    # Try to reconstruct with proper format
+                    begin_marker = '-----BEGIN PRIVATE KEY-----'
+                    end_marker = '-----END PRIVATE KEY-----'
+                    
+                    # Extract the key content (between markers if they exist)
+                    if '-----END' in private_key:
+                        # Has end marker, extract content
+                        parts = private_key.split('-----END')
+                        key_content = parts[0].replace('BEGIN PRIVATE KEY', '').replace('-----', '').strip()
+                        private_key = f'{begin_marker}\n{key_content}\n{end_marker}'
+                    else:
+                        # No end marker, assume the whole thing is the key
+                        key_content = private_key.replace('BEGIN PRIVATE KEY', '').replace('-----', '').strip()
+                        private_key = f'{begin_marker}\n{key_content}\n{end_marker}'
+            
+            # Final validation - ensure it has BEGIN and END markers
+            if '-----BEGIN' not in private_key or '-----END' not in private_key:
+                raise ValueError(
+                    "private_key לא בפורמט תקין.\n"
+                    "המפתח צריך להתחיל ב-'-----BEGIN PRIVATE KEY-----' ולהסתיים ב-'-----END PRIVATE KEY-----'.\n"
+                    "ודא שה-private_key ב-JSON כולל newlines אמיתיים (\\n) ולא escaped (\\\\n).\n"
+                    f"אורך המפתח המקורי: {len(original_key)} תווים\n"
+                    f"המפתח מתחיל ב: {original_key[:50] if len(original_key) > 50 else original_key}..."
+                )
+            
+            # Additional check: ensure the key looks valid
+            if len(private_key) < 100:
+                raise ValueError(
+                    "private_key נראה קצר מדי - ודא שהעתקת את כל המפתח מה-JSON file."
+                )
+            
+            creds_dict['private_key'] = private_key
+        
     except json.JSONDecodeError as e:
         raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
+    
+    # Validate required fields
+    required_fields = ['type', 'project_id', 'private_key', 'client_email']
+    missing_fields = [f for f in required_fields if f not in creds_dict]
+    if missing_fields:
+        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
     
     try:
         credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -1371,9 +1459,68 @@ def get_gspread_client():
         return client
     except Exception as e:
         error_msg = str(e)
-        if "invalid_grant" in error_msg.lower() or "invalid" in error_msg.lower():
-            raise ValueError(f"Invalid Google credentials. Please check your GOOGLE_CREDENTIALS JSON: {error_msg}")
-        raise
+        error_type = type(e).__name__
+        
+        # Provide specific error messages for common issues
+        if "seekable bit stream" in error_msg.lower() or "unsupportedsubstrateerror" in error_msg.lower():
+            # Check if we can see the private_key format
+            private_key_preview = ""
+            if 'private_key' in creds_dict:
+                pk = str(creds_dict['private_key'])
+                if len(pk) > 0:
+                    preview = pk[:100] + "..." if len(pk) > 100 else pk
+                    private_key_preview = f"\n**תצוגה מקדימה של private_key:** {preview}"
+            
+            detailed_msg = (
+                f"❌ **שגיאה בפורמט ה-private_key ב-GOOGLE_CREDENTIALS**\n\n"
+                f"**הבעיה:** ה-private_key לא בפורמט הנכון. זה קורה בדרך כלל כשה-private_key ב-Streamlit Secrets מוגדר עם escaped newlines.\n\n"
+                f"**פתרון:**\n"
+                f"1. פתח את הקובץ JSON המקורי מה-Google Cloud Console\n"
+                f"2. העתק את כל התוכן של הקובץ (כולל ה-private_key)\n"
+                f"3. ב-Streamlit Cloud Secrets, הגדר את GOOGLE_CREDENTIALS כ-JSON מלא:\n"
+                f"   ```\n"
+                f"   GOOGLE_CREDENTIALS = {{\n"
+                f"     \"type\": \"service_account\",\n"
+                f"     \"project_id\": \"...\",\n"
+                f"     \"private_key\": \"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n\",\n"
+                f"     ...\n"
+                f"   }}\n"
+                f"   ```\n"
+                f"4. **חשוב:** ודא שה-private_key כולל `\\n` (escaped newlines) בתוך המחרוזת\n"
+                f"5. שמור והפעל מחדש את האפליקציה\n\n"
+                f"**או** אם אתה משתמש ב-Secrets Editor ב-Streamlit Cloud:\n"
+                f"- העתק את כל ה-JSON כפי שהוא מהקובץ\n"
+                f"- הדבק ב-Secrets Editor\n"
+                f"- שמור\n\n"
+                f"{private_key_preview}\n\n"
+                f"**סוג שגיאה:** {error_type}\n"
+                f"**פרטים:** {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        elif "invalid_grant" in error_msg.lower():
+            detailed_msg = (
+                f"אימות נכשל - האימות ל-Google API נכשל.\n"
+                f"בדוק שהחשבון השירות פעיל ושהמפתח לא פג תוקף.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        elif "invalid" in error_msg.lower():
+            detailed_msg = (
+                f"Credentials לא תקינים.\n"
+                f"בדוק את GOOGLE_CREDENTIALS ב-Streamlit Cloud Secrets.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        else:
+            # Generic error with full details
+            detailed_msg = (
+                f"שגיאה בחיבור ל-Google API.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
 
 def generate_order_number(df):
     """Generate new order number based on existing max"""
@@ -1842,12 +1989,29 @@ def load_data_from_sheet():
         return pd.DataFrame()
     except Exception as e:
         error_type = type(e).__name__
-        error_msg = f"❌ **שגיאה בטעינת נתונים ({error_type}):** {str(e)}"
+        error_str = str(e)
+        
+        # Create detailed error message
+        error_msg = f"❌ **שגיאה בטעינת נתונים ({error_type}):** {error_str}"
+        
+        # Add more specific information based on error type
+        if "seekable bit stream" in error_str.lower():
+            error_msg += "\n\n💡 **פתרון אפשרי:** בעיה בפורמט ה-JSON של GOOGLE_CREDENTIALS. ודא שהמשתנה הוא JSON תקין."
+        elif "invalid_grant" in error_str.lower():
+            error_msg += "\n\n💡 **פתרון אפשרי:** האימות נכשל. בדוק שהחשבון השירות פעיל ושהמפתח לא פג תוקף."
+        elif "timeout" in error_str.lower() or "connection" in error_str.lower():
+            error_msg += "\n\n💡 **פתרון אפשרי:** בעיית חיבור ל-Google API. נסה שוב בעוד כמה רגעים."
+        
         st.session_state.sheet_error = error_msg
         st.error(error_msg)
+        
+        # Always show detailed traceback
         import traceback
-        with st.expander("🔍 פרטי שגיאה מפורטים"):
+        with st.expander("🔍 פרטי שגיאה מפורטים (לפיתוח)"):
             st.code(traceback.format_exc())
+            st.write("**סוג שגיאה:**", error_type)
+            st.write("**הודעת שגיאה:**", error_str)
+        
         load_data_from_sheet.clear()
         return pd.DataFrame()
 
@@ -3323,7 +3487,16 @@ st.title(t("title"))
 if df.empty:
     # Show stored error if available
     if 'sheet_error' in st.session_state:
-        st.error(st.session_state.sheet_error)
+        error_to_show = st.session_state.sheet_error
+        # Make sure error is displayed prominently
+        st.error("🔴 **שגיאה בחיבור ל-Google Sheets**")
+        st.error(error_to_show)
+        # Also show in an expander for better visibility
+        with st.expander("📋 פרטי השגיאה המלאים", expanded=True):
+            st.markdown(error_to_show)
+    else:
+        # If no specific error but data is empty, show generic message
+        st.warning("⚠️ **לא נטענו נתונים** - לא נמצאה שגיאה ספציפית")
     
     st.warning(t("no_data"))
     
@@ -3334,7 +3507,22 @@ if df.empty:
         
         # 1. Check GOOGLE_CREDENTIALS environment variable
         st.subheader("1️⃣ בדיקת משתנה הסביבה GOOGLE_CREDENTIALS")
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+        
+        # Try to get from Streamlit secrets first
+        creds_json = None
+        creds_source = None
+        try:
+            if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
+                creds_json = st.secrets['GOOGLE_CREDENTIALS']
+                creds_source = "Streamlit Secrets"
+        except:
+            pass
+        
+        # Fallback to environment variable
+        if not creds_json:
+            creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+            creds_source = "Environment Variable"
+        
         if not creds_json:
             st.error("❌ **GOOGLE_CREDENTIALS לא נמצא**")
             st.info("💡 **פתרון:** הגדר את המשתנה ב-Streamlit Cloud Secrets:")
@@ -3346,9 +3534,12 @@ if df.empty:
             """)
             diagnostic_results['credentials'] = False
         else:
-            st.success("✅ **GOOGLE_CREDENTIALS נמצא**")
+            st.success(f"✅ **GOOGLE_CREDENTIALS נמצא** (מ-{creds_source})")
             try:
-                if isinstance(creds_json, str):
+                if isinstance(creds_json, dict):
+                    # Already a dictionary (from Streamlit secrets)
+                    creds_dict = creds_json
+                elif isinstance(creds_json, str):
                     creds_dict = json.loads(creds_json)
                 else:
                     creds_dict = dict(creds_json)
@@ -3361,10 +3552,21 @@ if df.empty:
                     st.warning(f"⚠️ **שדות חסרים ב-JSON:** {', '.join(missing_fields)}")
                     diagnostic_results['credentials'] = False
                 else:
+                    # Check if private_key has proper format
+                    private_key = creds_dict.get('private_key', '')
+                    if private_key and isinstance(private_key, str):
+                        if 'BEGIN PRIVATE KEY' not in private_key:
+                            st.warning("⚠️ **private_key לא נראה תקין** - ודא שהוא כולל 'BEGIN PRIVATE KEY'")
+                        elif '\\n' in private_key and '\n' not in private_key:
+                            st.info("ℹ️ **private_key מכיל \\n** - זה יתוקן אוטומטית")
+                    
                     st.success(f"✅ **JSON תקין** - חשבון שירות: `{creds_dict.get('client_email', 'לא נמצא')}`")
                     diagnostic_results['credentials'] = True
             except json.JSONDecodeError as e:
                 st.error(f"❌ **JSON לא תקין:** {str(e)}")
+                diagnostic_results['credentials'] = False
+            except Exception as e:
+                st.error(f"❌ **שגיאה בפענוח:** {str(e)}")
                 diagnostic_results['credentials'] = False
         
         st.markdown("---")
@@ -3462,7 +3664,17 @@ if df.empty:
                                 st.session_state.connection_test_done = True
                                 st.session_state.connection_test_results = diagnostic_results.copy()
                     except Exception as e:
-                        st.error(f"❌ **שגיאה בחיבור:** {str(e)}")
+                        error_type = type(e).__name__
+                        error_str = str(e)
+                        st.error(f"❌ **שגיאה בחיבור ({error_type}):** {error_str}")
+                        
+                        # Show detailed error info
+                        with st.expander("🔍 פרטי שגיאה מפורטים"):
+                            import traceback
+                            st.code(traceback.format_exc())
+                            st.write("**סוג שגיאה:**", error_type)
+                            st.write("**הודעת שגיאה:**", error_str)
+                        
                         diagnostic_results['connection'] = False
                         st.session_state.connection_test_done = True
                         st.session_state.connection_test_results = diagnostic_results.copy()
