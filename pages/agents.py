@@ -888,17 +888,39 @@ elif selected_tab == "📦 ניהול ספקים":
             # Make sure edit_df is a fresh copy to avoid any state conflicts
             edit_df_for_editor = edit_df.copy()
             
-            # st.data_editor with key - Streamlit manages session_state automatically
-            # DO NOT manually set st.session_state["docket_editor"] anywhere!
-            edited_df = st.data_editor(
-                edit_df_for_editor,
-                column_config=column_config,
-                use_container_width=True,
-                height=450,
-                num_rows="fixed",
-                hide_index=True,
-                key="docket_editor"
-            )
+            # Ensure the DataFrame is not empty and has the required columns
+            if edit_df_for_editor.empty:
+                st.warning("אין נתונים לעריכה")
+                edited_df = pd.DataFrame()
+            else:
+                # Clear any existing session_state for this key to avoid conflicts
+                if "docket_editor" in st.session_state:
+                    # Don't delete, but ensure it's not corrupted
+                    pass
+                
+                # st.data_editor with key - Streamlit manages session_state automatically
+                # DO NOT manually set st.session_state["docket_editor"] anywhere!
+                try:
+                    edited_df = st.data_editor(
+                        edit_df_for_editor,
+                        column_config=column_config,
+                        use_container_width=True,
+                        height=450,
+                        num_rows="fixed",
+                        hide_index=True,
+                        key="docket_editor"
+                    )
+                except Exception as e:
+                    st.error(f"שגיאה בעריכת נתונים: {str(e)}")
+                    # Fallback: try without key
+                    edited_df = st.data_editor(
+                        edit_df_for_editor,
+                        column_config=column_config,
+                        use_container_width=True,
+                        height=450,
+                        num_rows="fixed",
+                        hide_index=True
+                    )
             
             col_save, col_info = st.columns([1, 3])
             with col_save:
