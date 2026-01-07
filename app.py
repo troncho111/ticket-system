@@ -6229,8 +6229,14 @@ with tab4:
     st.header("🆕 הזמנות חדשות לטיפול")
     st.markdown("*כל ההזמנות עם סטטוס 'New' או ללא סטטוס - עדכן מספר הזמנה ספק וסטטוס*")
     
-    # Load FRESH data directly - ignore sidebar filters
-    fresh_df = load_data_from_sheet()
+    # Use session state to cache data and prevent reload on every rerun
+    # Only reload if explicitly requested or if data doesn't exist
+    if 'tab4_fresh_df' not in st.session_state or st.session_state.get('tab4_needs_refresh', False):
+        with st.spinner("טוען נתונים..."):
+            st.session_state.tab4_fresh_df = load_data_from_sheet()
+            st.session_state.tab4_needs_refresh = False
+    
+    fresh_df = st.session_state.tab4_fresh_df
     tab4_status_col = 'orderd' if 'orderd' in fresh_df.columns else None
     
     if tab4_status_col:
@@ -6361,6 +6367,7 @@ with tab4:
                                     worksheet.batch_update(updates)
                                     st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
                                     st.cache_data.clear()
+                                    st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
                                 else:
@@ -6378,6 +6385,7 @@ with tab4:
                                 if success:
                                     st.success(f"✅ הזמנה #{order_num} נמחקה!")
                                     st.cache_data.clear()
+                                    st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
                             else:
