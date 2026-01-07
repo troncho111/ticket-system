@@ -6369,19 +6369,19 @@ with tab4:
                                 st.error(f"שגיאה: {str(e)}")
                         else:
                             st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
-                    
-                    # Handle delete button click
-                    if delete_clicked:
-                        if row_idx:
-                            with st.spinner("מוחק הזמנה..."):
-                                success = delete_order_row(row_idx)
-                            if success:
-                                st.success(f"✅ הזמנה #{order_num} נמחקה!")
-                                st.cache_data.clear()
-                                time.sleep(0.5)
-                                st.rerun()
-                        else:
-                            st.warning("לא נמצא מספר שורה")
+                        
+                        # Handle delete button click INSIDE form to prevent rerun
+                        if delete_clicked:
+                            if row_idx:
+                                with st.spinner("מוחק הזמנה..."):
+                                    success = delete_order_row(row_idx)
+                                if success:
+                                    st.success(f"✅ הזמנה #{order_num} נמחקה!")
+                                    st.cache_data.clear()
+                                    time.sleep(0.5)
+                                    st.rerun()
+                            else:
+                                st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:
