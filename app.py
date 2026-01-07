@@ -6257,6 +6257,11 @@ with tab4:
             # Refresh button
             if st.button("🔄 רענן נתונים", key="refresh_new_orders"):
                 st.cache_data.clear()
+                # Clear cached filtered data
+                for key in list(st.session_state.keys()):
+                    if key.startswith('tab4_all_new_orders_'):
+                        del st.session_state[key]
+                st.session_state.tab4_needs_refresh = True
                 st.rerun()
             
             st.markdown("---")
