@@ -892,42 +892,35 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
-            # st.data_editor - use a fixed key to ensure stability
+            # st.data_editor - CRITICAL: Do NOT use key to avoid StreamlitValueAssignmentNotAllowedError
+            # The key causes state conflicts when the DataFrame structure changes
             # Make sure edit_df is a fresh copy
             edit_df_for_editor = edit_df.copy()
+            
+            # CRITICAL: Clear any existing session state for data_editor to prevent conflicts
+            # This ensures clean state on each rerun
+            editor_state_keys = [k for k in st.session_state.keys() if 'supplier_management_editor' in str(k) or 'data_editor' in str(k).lower()]
+            for key in editor_state_keys:
+                try:
+                    del st.session_state[key]
+                except:
+                    pass
             
             # Ensure the DataFrame is not empty
             if edit_df_for_editor.empty:
                 st.warning("אין נתונים לעריכה")
                 edited_df = pd.DataFrame()
             else:
-                # Use st.data_editor with a fixed key to ensure state management works correctly
-                # The key must be fixed and not change between reruns
-                try:
-                    edited_df = st.data_editor(
-                        edit_df_for_editor,
-                        column_config=column_config,
-                        use_container_width=True,
-                        height=450,
-                        num_rows="fixed",
-                        hide_index=True,
-                        key="supplier_management_editor"
-                    )
-                except Exception as e:
-                    # If there's an error, try without key as fallback
-                    st.error(f"שגיאה בטעינת הטבלה: {str(e)}")
-                    try:
-                        edited_df = st.data_editor(
-                            edit_df_for_editor,
-                            column_config=column_config,
-                            use_container_width=True,
-                            height=450,
-                            num_rows="fixed",
-                            hide_index=True
-                        )
-                    except Exception as e2:
-                        st.error(f"שגיאה קריטית: {str(e2)}")
-                        edited_df = edit_df_for_editor.copy()
+                # Use st.data_editor WITHOUT key to avoid StreamlitValueAssignmentNotAllowedError
+                # This means state won't persist across reruns, but it will work without errors
+                edited_df = st.data_editor(
+                    edit_df_for_editor,
+                    column_config=column_config,
+                    use_container_width=True,
+                    height=450,
+                    num_rows="fixed",
+                    hide_index=True
+                )
             
             col_save, col_info = st.columns([1, 3])
             with col_save:
