@@ -5661,10 +5661,9 @@ with tab1:
                             
                             # Store previous state to detect changes
                             editor_key = f"editor_{key}"
-                            if editor_key not in st.session_state:
-                                st.session_state[editor_key] = None
-            
-                            edited_df = st.data_editor(
+                            
+                            # Use data_editor without assignment first, then get value from session_state
+                            st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=column_config,
                                 disabled=non_editable_cols + ['row_index'],
@@ -5672,6 +5671,12 @@ with tab1:
                                 use_container_width=True,
                                 key=editor_key
                             )
+                            
+                            # Get edited data from session_state if available
+                            if editor_key in st.session_state and st.session_state[editor_key] is not None:
+                                edited_df = st.session_state[editor_key]
+                            else:
+                                edited_df = display_df[show_cols + ['row_index']].copy()
                             
                             # Only process if button clicked, not on every edit
                             # The button click will trigger the save logic
@@ -6234,9 +6239,9 @@ with tab3:
                             
                             # Store previous state to detect changes
                             op_editor_key = f"op_editor_{key}"
-                            if op_editor_key not in st.session_state:
-                                st.session_state[op_editor_key] = None
-            
+                            
+                            # st.data_editor automatically manages session_state with the key
+                            # We just need to get the return value directly
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=op_column_config,
