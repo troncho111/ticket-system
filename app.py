@@ -3283,7 +3283,12 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📧 שליחת דוחות למייל")
     
-    temp_df_for_email = load_data_from_sheet()
+    # Cache email report data to prevent reload on every rerun
+    if 'email_report_df' not in st.session_state or st.session_state.get('needs_data_refresh', False):
+        temp_df_for_email = load_data_from_sheet()
+        st.session_state.email_report_df = temp_df_for_email
+    else:
+        temp_df_for_email = st.session_state.email_report_df
     
     # Use on_change with empty callback to prevent rerun on selectbox/text_input change
     def empty_callback_email():
