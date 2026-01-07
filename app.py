@@ -1076,30 +1076,19 @@ def send_unpaid_orders_report_email(orders_df, to_email):
         except:
             pass
     
-    # Method 4: Default fallback - MUST have a valid URL
-    # IMPORTANT: User must set APP_BASE_URL in Streamlit Cloud Secrets!
+    # Method 4: Default fallback - use the actual Streamlit Cloud URL
     if not app_url or app_url.lower() in ['none', 'null', '']:
-        # Try to construct Streamlit Cloud URL from common patterns
-        # But this is a fallback - user should set APP_BASE_URL in secrets
-        try:
-            # Check if we're on Streamlit Cloud by looking at environment
-            streamlit_cloud_url = os.environ.get('STREAMLIT_CLOUD_URL', None)
-            if streamlit_cloud_url:
-                app_url = streamlit_cloud_url
-            else:
-                # Last resort - but this won't work, user must set it
-                app_url = None  # Will cause error message
-        except:
-            app_url = None
+        # Use the actual Streamlit Cloud URL as fallback
+        app_url = 'https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app'
     
-    # Final validation - warn if URL is missing but still send email
+    # Final validation - ensure URL is valid
     url_warning = ""
     if not app_url or app_url.lower() in ['none', 'null', '']:
         url_warning = """
 <div style="background: #fff3cd; padding: 15px; margin: 20px 0; border-radius: 8px; border-right: 4px solid #ffc107;">
 <p style="color: #856404; margin: 0;"><strong>⚠️ הערה:</strong> כפתור "סמן כשולם" לא זמין כי כתובת האפליקציה לא מוגדרת.</p>
 <p style="color: #856404; margin: 10px 0 0 0;">💡 <strong>פתרון:</strong> הוסף ב-Streamlit Cloud Secrets:</p>
-<p style="color: #856404; margin: 5px 0; font-family: monospace; background: #fff; padding: 5px; border-radius: 3px;">APP_BASE_URL = "https://your-app-name.streamlit.app"</p>
+<p style="color: #856404; margin: 5px 0; font-family: monospace; background: #fff; padding: 5px; border-radius: 3px;">APP_BASE_URL = "https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app"</p>
 </div>
 """
         app_url = None  # Set to None so buttons won't be created
