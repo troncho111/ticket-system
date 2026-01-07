@@ -6355,44 +6355,44 @@ with tab4:
                         st.markdown(f"### 🎫 הזמנה #{order_num}")
                         st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
                     
-                    # Use form to prevent rerun on input change - only update on button click
-                    with st.form(key=f"order_form_{idx}_{order_num}", clear_on_submit=False):
-                        col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
-                        with col1:
-                            new_supp_order = st.text_input(
-                                "מס' הזמנה ספק",
-                                value=current_supp_order,
-                                key=f"tab4_supp_{idx}_{order_num}",
-                                placeholder="הכנס מספר הזמנה ספק"
-                            )
-                        with col2:
-                            status_options = ['new', 'orderd', 'done!', 'old no data']
-                            current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
-                            new_status = st.selectbox(
-                                "סטטוס",
-                                options=status_options,
-                                index=current_idx,
-                                key=f"tab4_status_{idx}_{order_num}"
-                            )
-                        with col3:
-                            supp_price_val = order.get('SUPP PRICE', '')
-                            new_supp_price = st.text_input(
-                                "מחיר ספק",
-                                value=str(supp_price_val) if supp_price_val else "",
-                                key=f"tab4_price_{idx}_{order_num}",
-                                placeholder="מחיר"
-                            )
-                        with col4:
-                            st.write("")
-                            st.write("")
-                            save_clicked = st.form_submit_button("💾 שמור", type="primary", use_container_width=True)
-                        with col5:
-                            st.write("")
-                            st.write("")
-                            delete_clicked = st.form_submit_button("🗑️ מחק", type="secondary", use_container_width=True)
-                    
-                    # Handle save button click
-                    if save_clicked:
+                        # Use form to prevent rerun on input change - only update on button click
+                        with st.form(key=f"order_form_{idx}_{order_num}", clear_on_submit=False):
+                            col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
+                            with col1:
+                                new_supp_order = st.text_input(
+                                    "מס' הזמנה ספק",
+                                    value=current_supp_order,
+                                    key=f"tab4_supp_{idx}_{order_num}",
+                                    placeholder="הכנס מספר הזמנה ספק"
+                                )
+                            with col2:
+                                status_options = ['new', 'orderd', 'done!', 'old no data']
+                                current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
+                                new_status = st.selectbox(
+                                    "סטטוס",
+                                    options=status_options,
+                                    index=current_idx,
+                                    key=f"tab4_status_{idx}_{order_num}"
+                                )
+                            with col3:
+                                supp_price_val = order.get('SUPP PRICE', '')
+                                new_supp_price = st.text_input(
+                                    "מחיר ספק",
+                                    value=str(supp_price_val) if supp_price_val else "",
+                                    key=f"tab4_price_{idx}_{order_num}",
+                                    placeholder="מחיר"
+                                )
+                            with col4:
+                                st.write("")
+                                st.write("")
+                                save_clicked = st.form_submit_button("💾 שמור", type="primary", use_container_width=True)
+                            with col5:
+                                st.write("")
+                                st.write("")
+                                delete_clicked = st.form_submit_button("🗑️ מחק", type="secondary", use_container_width=True)
+                            
+                            # Handle save button click INSIDE form
+                            if save_clicked:
                         if row_idx:
                             try:
                                 client = get_gspread_client()
