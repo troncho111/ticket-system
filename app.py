@@ -4206,7 +4206,12 @@ if df.empty:
 now = datetime.now()
 status_col = 'orderd' if 'orderd' in df.columns else None
 
-df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
+# Cache has_supplier_data to prevent recalculation on every rerun
+if 'df_has_supplier_data' not in st.session_state or st.session_state.get('needs_data_refresh', False):
+    df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
+    st.session_state.df_has_supplier_data = df['has_supplier_data'].copy()
+else:
+    df['has_supplier_data'] = st.session_state.df_has_supplier_data
 
 supp_name_col = 'Supplier NAME' if 'Supplier NAME' in df.columns else None
 supp_order_col = None
@@ -4218,17 +4223,45 @@ for col in df.columns:
 week_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 week_end = week_start + timedelta(days=7)
 
-total_orders = len(df)
-total_tickets = pd.to_numeric(df.get('Qty', 0), errors='coerce').sum()
-total_sales = df['TOTAL_clean'].sum()
-total_supp_cost = df[df['has_supplier_data'] == True]['SUPP_PRICE_clean'].sum()
-total_profit = df[df['has_supplier_data'] == True]['profit'].sum()
-profit_pct = (total_profit / total_sales * 100) if total_sales > 0 else 0
-
-new_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'new']) if status_col else 0
-orderd_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'orderd']) if status_col else 0
-done_count = len(df[df[status_col].fillna('').str.lower().str.strip().isin(['done!', 'done'])]) if status_col else 0
-needs_attention = len(df[(df['has_supplier_data'] == False) & (df[status_col].fillna('').str.lower().str.strip() == 'new')]) if status_col else 0
+# Cache expensive calculations to prevent recalculation on every rerun
+cache_key_metrics = f"metrics_{hash(str(df.index.tolist()[:10]))}"
+if cache_key_metrics not in st.session_state or st.session_state.get('needs_data_refresh', False):
+    total_orders = len(df)
+    total_tickets = pd.to_numeric(df.get('Qty', 0), errors='coerce').sum()
+    total_sales = df['TOTAL_clean'].sum()
+    total_supp_cost = df[df['has_supplier_data'] == True]['SUPP_PRICE_clean'].sum()
+    total_profit = df[df['has_supplier_data'] == True]['profit'].sum()
+    profit_pct = (total_profit / total_sales * 100) if total_sales > 0 else 0
+    
+    new_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'new']) if status_col else 0
+    orderd_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'orderd']) if status_col else 0
+    done_count = len(df[df[status_col].fillna('').str.lower().str.strip().isin(['done!', 'done'])]) if status_col else 0
+    needs_attention = len(df[(df['has_supplier_data'] == False) & (df[status_col].fillna('').str.lower().str.strip() == 'new')]) if status_col else 0
+    
+    st.session_state[cache_key_metrics] = {
+        'total_orders': total_orders,
+        'total_tickets': total_tickets,
+        'total_sales': total_sales,
+        'total_supp_cost': total_supp_cost,
+        'total_profit': total_profit,
+        'profit_pct': profit_pct,
+        'new_count': new_count,
+        'orderd_count': orderd_count,
+        'done_count': done_count,
+        'needs_attention': needs_attention
+    }
+else:
+    metrics = st.session_state[cache_key_metrics]
+    total_orders = metrics['total_orders']
+    total_tickets = metrics['total_tickets']
+    total_sales = metrics['total_sales']
+    total_supp_cost = metrics['total_supp_cost']
+    total_profit = metrics['total_profit']
+    profit_pct = metrics['profit_pct']
+    new_count = metrics['new_count']
+    orderd_count = metrics['orderd_count']
+    done_count = metrics['done_count']
+    needs_attention = metrics['needs_attention']
 
 if 'dashboard_filter' not in st.session_state:
     st.session_state.dashboard_filter = None
