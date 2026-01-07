@@ -6197,8 +6197,8 @@ with tab4:
                             else:
                                 st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
             
-            # Call the fragment function
-            render_order_forms(all_new_orders)
+            # Call the fragment function - pass status_col as parameter
+            render_order_forms(all_new_orders, tab4_status_col)
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:
