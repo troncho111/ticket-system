@@ -328,32 +328,36 @@ def show_order_details(row, docket_col, unique_key=""):
     
     st.markdown("### ✏️ עדכון מספר דוקט")
     
-    col_input, col_btn = st.columns([3, 1])
-    with col_input:
-        new_docket = st.text_input(
-            "מספר דוקט חדש:",
-            value="" if docket_is_empty else "",
-            placeholder=f"נוכחי: {docket}" if not docket_is_empty else "הזן מספר דוקט",
-            key=f"docket_input_{unique_key}_{order_num}"
-        )
+    # Use form to prevent rerun on input change - only update on button click
+    with st.form(key=f"docket_form_{unique_key}_{order_num}", clear_on_submit=False):
+        col_input, col_btn = st.columns([3, 1])
+        with col_input:
+            new_docket = st.text_input(
+                "מספר דוקט חדש:",
+                value="" if docket_is_empty else "",
+                placeholder=f"נוכחי: {docket}" if not docket_is_empty else "הזן מספר דוקט",
+                key=f"docket_input_{unique_key}_{order_num}"
+            )
+        
+        with col_btn:
+            st.markdown("<br>", unsafe_allow_html=True)
+            update_clicked = st.form_submit_button("✅ עדכן", type="primary", use_container_width=True)
     
-    with col_btn:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("✅ עדכן", key=f"update_btn_{unique_key}_{order_num}", type="primary"):
-            if new_docket and new_docket.strip() and row_idx:
-                with st.spinner("מעדכן בגוגל שיטס..."):
-                    success, message = update_docket_number(row_idx, new_docket.strip())
-                    if success:
-                        load_data_from_sheet.clear()
-                        st.success(f"✅ {message}")
-                        st.balloons()
-                        st.info(f"דוקט עודכן: `{docket}` ➜ `{new_docket}` להזמנה {order_num}")
-                    else:
-                        st.error(f"❌ {message}")
-            elif not new_docket or not new_docket.strip():
-                st.warning("יש להזין מספר דוקט חדש")
-            else:
-                st.error("לא נמצא מספר שורה לעדכון")
+    if update_clicked:
+        if new_docket and new_docket.strip() and row_idx:
+            with st.spinner("מעדכן בגוגל שיטס..."):
+                success, message = update_docket_number(row_idx, new_docket.strip())
+                if success:
+                    load_data_from_sheet.clear()
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                    st.info(f"דוקט עודכן: `{docket}` ➜ `{new_docket}` להזמנה {order_num}")
+                else:
+                    st.error(f"❌ {message}")
+        elif not new_docket or not new_docket.strip():
+            st.warning("יש להזין מספר דוקט חדש")
+        else:
+            st.error("לא נמצא מספר שורה לעדכון")
     
     st.markdown("---")
     st.markdown("**📋 העתק הכל:**")
