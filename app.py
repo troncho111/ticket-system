@@ -6390,6 +6390,10 @@ with tab4:
                                 if success:
                                     st.success(f"✅ הזמנה #{order_num} נמחקה!")
                                     st.cache_data.clear()
+                                    # Clear cached filtered data
+                                    for key in list(st.session_state.keys()):
+                                        if key.startswith('tab4_all_new_orders_'):
+                                            del st.session_state[key]
                                     st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
