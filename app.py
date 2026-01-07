@@ -1021,275 +1021,6 @@ def send_weekly_sales_report_email(orders_df, to_email, week_start_date=None, we
         return False, f"שגיאה בשליחת מייל: {str(e)}"
 
 
-def send_unpaid_orders_report_email(orders_df, to_email):
-    """Send email report with all unpaid orders (sent - not paid) - RED THEME with Mark as Paid buttons"""
-    api_key, from_email = get_resend_credentials()
-    
-    if not api_key or not from_email:
-        error_msg = (
-            "❌ **לא נמצאו פרטי התחברות ל-Resend**\n\n"
-            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
-            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
-            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
-        )
-        return False, error_msg
-    
-    if orders_df.empty:
-        return False, "אין הזמנות שלא שולמו לשלוח"
-    
-    resend.api_key = api_key
-    
-    israel_tz = pytz.timezone('Israel')
-    now = datetime.now(israel_tz)
-    
-    # Get app base URL for mark-as-paid links
-    # Try multiple methods to get the correct URL
-    app_url = None
-    
-    # Method 1: Try Streamlit Secrets
-    try:
-        if hasattr(st, 'secrets'):
-            if 'APP_BASE_URL' in st.secrets:
-                app_url = st.secrets['APP_BASE_URL']
-            elif hasattr(st.secrets, 'get'):
-                app_url = st.secrets.get('APP_BASE_URL')
-    except:
-        pass
-    
-    # Method 2: Try environment variable
-    if not app_url:
-        app_url = os.environ.get('APP_BASE_URL', None)
-    
-    # Method 3: Try to get from Streamlit config (for Streamlit Cloud)
-    if not app_url:
-        try:
-            # For Streamlit Cloud, try to get the URL from the request
-            import streamlit.web.server.websocket_headers as ws_headers
-            try:
-                headers = ws_headers._get_websocket_headers()
-                if headers and 'host' in headers:
-                    host = headers.get('host', '')
-                    if host and 'streamlit.app' in host:
-                        app_url = f"https://{host}"
-            except:
-                pass
-        except:
-            pass
-    
-    # Method 4: Default fallback - use the actual Streamlit Cloud URL
-    if not app_url or app_url.lower() in ['none', 'null', '']:
-        # Use the actual Streamlit Cloud URL as fallback
-        app_url = 'https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app'
-    
-    # Final validation - ensure URL is valid
-    url_warning = ""
-    if not app_url or app_url.lower() in ['none', 'null', '']:
-        url_warning = """
-<div style="background: #fff3cd; padding: 15px; margin: 20px 0; border-radius: 8px; border-right: 4px solid #ffc107;">
-<p style="color: #856404; margin: 0;"><strong>⚠️ הערה:</strong> כפתור "סמן כשולם" לא זמין כי כתובת האפליקציה לא מוגדרת.</p>
-<p style="color: #856404; margin: 10px 0 0 0;">💡 <strong>פתרון:</strong> הוסף ב-Streamlit Cloud Secrets:</p>
-<p style="color: #856404; margin: 5px 0; font-family: monospace; background: #fff; padding: 5px; border-radius: 3px;">APP_BASE_URL = "https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app"</p>
-</div>
-"""
-        app_url = None  # Set to None so buttons won't be created
-    
-    # Calculate totals
-    total_amount = 0
-    if 'TOTAL' in orders_df.columns:
-        for total_val in orders_df['TOTAL']:
-            if total_val and total_val != '-':
-                try:
-                    amount = float(str(total_val).replace('€','').replace('£','').replace('$','').replace(',','').strip())
-                    total_amount += amount
-                except:
-                    pass
-    
-    email_body = f"""<!DOCTYPE html>
-<html dir="rtl" lang="he">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,sans-serif;">
-<div dir="rtl" style="max-width:600px;margin:0 auto;background:#fff;">
-
-<div style="background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;padding:20px;text-align:center;">
-<div style="font-size:22px;font-weight:bold;">🔴 תזכורת - הזמנות לא שולמו</div>
-<div style="font-size:13px;opacity:0.9;margin-top:5px;">קוד יהודה | {now.strftime('%d/%m/%Y %H:%M')}</div>
-</div>
-
-<div style="background:#dc2626;color:#fff;padding:15px;text-align:center;font-size:18px;font-weight:bold;">
-{len(orders_df)} הזמנות ממתינות לתשלום
-</div>
-
-<div style="padding:20px;">
-"""
-    
-    # Generate mark-as-paid tokens and build order cards
-    for idx, (_, order) in enumerate(orders_df.iterrows()):
-        order_num = order.get('Order number', '-')
-        event_name = order.get('event name', '-')
-        docket = order.get('docket number', order.get('docket', order.get('Docket', '-')))
-        source = order.get('source', '-')
-        supp_order = order.get('SUPP order number', '-')
-        event_date = order.get('Date of the event', '-')
-        qty = order.get('Qty', order.get('QTY', '-'))
-        price_sold = order.get('Price sold', '-')
-        total_sold = order.get('TOTAL', '-')
-        row_index = order.get('row_index', '')
-        
-        if total_sold and total_sold != '-':
-            try:
-                amount = float(str(total_sold).replace('€','').replace('£','').replace('$','').replace(',','').strip())
-                total_display = f"€{amount:,.2f}"
-            except:
-                total_display = str(total_sold)
-        else:
-            total_display = '-'
-        
-        # Generate mark-as-paid token and button
-        mark_paid_button = ""
-        
-        # Get row_index - try multiple ways
-        row_idx = None
-        try:
-            # Method 1: Direct access
-            if 'row_index' in order:
-                row_idx_val = order['row_index']
-                if pd.notna(row_idx_val) and row_idx_val != '':
-                    try:
-                        row_idx = int(row_idx_val)
-                    except:
-                        try:
-                            row_idx = int(float(row_idx_val))
-                        except:
-                            pass
-            
-            # Method 2: Try to get from index if row_index column doesn't exist
-            if not row_idx or row_idx <= 1:
-                # Try to use the DataFrame index + 2 (since row 1 is header)
-                try:
-                    # Get the original index from the DataFrame
-                    if hasattr(orders_df, 'index'):
-                        original_idx = orders_df.index[idx]
-                        # Try to get row_index from original dataframe if available
-                        # This is a fallback
-                        row_idx = original_idx + 2 if original_idx >= 0 else None
-                except:
-                    pass
-        except:
-            pass
-        
-        # If row_index is valid, create the button
-        if row_idx and row_idx > 1:  # row_index should be >= 2 (row 1 is header)
-            try:
-                # Ensure app_url is valid
-                if not app_url or app_url.lower() in ['none', 'null', '']:
-                    app_url = 'https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app'
-                
-                # Try to get SESSION_SECRET from environment or secrets
-                secret = None
-                try:
-                    secret = os.environ.get('SESSION_SECRET')
-                except:
-                    pass
-                
-                if not secret:
-                    try:
-                        if hasattr(st, 'secrets') and 'SESSION_SECRET' in st.secrets:
-                            secret = st.secrets['SESSION_SECRET']
-                    except:
-                        pass
-                
-                # Create URL - always create it if we have valid app_url and row_idx
-                mark_paid_url = None
-                if app_url and app_url.startswith('http') and row_idx:
-                    if secret and len(secret) >= 10:
-                        # With token (secure)
-                        data = f"{order_num}:{row_idx}:{secret}"
-                        token = hashlib.sha256(data.encode()).hexdigest()[:16]
-                        mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}&token={token}"
-                    else:
-                        # Without token (less secure, but works)
-                        mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
-                
-                # Create button if URL was created successfully
-                if mark_paid_url:
-                    mark_paid_button = f"""
-            <div style="margin-top: 15px; text-align: center;">
-                <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
-                    ✅ סמן כשולם (Done!)
-                </a>
-            </div>
-            """
-            except Exception as e:
-                # If there's an error, try to create button anyway with basic URL
-                try:
-                    if app_url and app_url.startswith('http') and row_idx:
-                        basic_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
-                        mark_paid_button = f"""
-            <div style="margin-top: 15px; text-align: center;">
-                <a href="{basic_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
-                    ✅ סמן כשולם (Done!)
-                </a>
-            </div>
-            """
-                except:
-                    pass
-        
-        email_body += f"""
-        <div style="background: #fee2e2; padding: 15px; margin: 10px 0; border-radius: 8px; border-right: 4px solid #dc2626;">
-            <h3 style="color: #dc2626; margin-top: 0;">הזמנה #{idx+1} - לא שולם</h3>
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr><td style="padding: 5px;"><strong>מספר הזמנה:</strong></td><td style="padding: 5px;">{order_num}</td></tr>
-                <tr><td style="padding: 5px;"><strong>שם אירוע:</strong></td><td style="padding: 5px;">{event_name}</td></tr>
-                <tr><td style="padding: 5px;"><strong>מספר דוקט:</strong></td><td style="padding: 5px;">{docket}</td></tr>
-                <tr><td style="padding: 5px;"><strong>מקור:</strong></td><td style="padding: 5px;">{source}</td></tr>
-                <tr><td style="padding: 5px;"><strong>מספר הזמנה ספק:</strong></td><td style="padding: 5px;">{supp_order}</td></tr>
-                <tr><td style="padding: 5px;"><strong>תאריך אירוע:</strong></td><td style="padding: 5px;">{event_date}</td></tr>
-                <tr><td style="padding: 5px;"><strong>כמות:</strong></td><td style="padding: 5px;">{qty}</td></tr>
-                <tr><td style="padding: 5px;"><strong>מחיר מקורי לכרטיס:</strong></td><td style="padding: 5px;">{price_sold}</td></tr>
-                <tr style="background: #dc2626; color: white;"><td style="padding: 5px;"><strong>סכום לגבייה:</strong></td><td style="padding: 5px;"><strong>{total_display}</strong></td></tr>
-            </table>
-            {mark_paid_button}
-        </div>
-        """
-    
-    if total_amount > 0:
-        email_body += f"""
-<div style="background: #dc2626; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-top: 20px;">
-<h2 style="margin: 0;">סה"כ לגבייה: €{total_amount:,.2f}</h2>
-</div>
-"""
-    
-    # Add URL warning if needed
-    if url_warning:
-        email_body += url_warning
-    
-    email_body += """
-</div>
-
-<div style="background:#1a1a2e;color:#aaa;padding:15px;text-align:center;font-size:11px;">
-<div>מערכת ניהול הזמנות - קוד יהודה</div>
-<div style="margin-top:5px;">דוח יזום - הזמנות שלא שולמו</div>
-</div>
-
-</div>
-</body>
-</html>"""
-    
-    try:
-        result = resend.Emails.send({
-            "from": from_email,
-            "to": [to_email],
-            "subject": f"🔴 תזכורת - {len(orders_df)} הזמנות לא שולמו! (€{total_amount:,.2f})",
-            "html": email_body
-        })
-        return True, f"המייל נשלח בהצלחה! ID: {result.get('id', 'N/A')}"
-    except Exception as e:
-        return False, f"שגיאה בשליחת מייל: {str(e)}"
-
-
 SOURCE_DISPLAY_NAMES = {
     'goldenseat': 'Goldenseat/TikTik',
     'tiktik': 'Goldenseat/TikTik',
@@ -1365,99 +1096,6 @@ st.set_page_config(
 
 import hashlib
 
-# Define constants and functions needed for mark_paid functionality BEFORE using them
-SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
-WORKSHEET_INDEX = 0
-
-def get_gspread_client():
-    """Create and return a gspread client using credentials from environment."""
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    
-    # Try to get from Streamlit secrets first (if available)
-    creds_json = None
-    try:
-        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
-            creds_json = st.secrets['GOOGLE_CREDENTIALS']
-    except:
-        pass
-    
-    # Fallback to environment variable
-    if not creds_json:
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-    
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
-    
-    # Handle different input formats
-    try:
-        if isinstance(creds_json, dict):
-            creds_dict = creds_json
-        elif isinstance(creds_json, str):
-            creds_dict = json.loads(creds_json)
-        else:
-            creds_dict = dict(creds_json)
-        
-        # Ensure private_key is properly formatted (handle escaped newlines)
-        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
-            private_key = creds_dict['private_key']
-            import re
-            private_key = re.sub(r'\\{2,}n', '\n', private_key)
-            if '\\n' in private_key:
-                private_key = private_key.replace('\\n', '\n')
-            if '-----BEGIN PRIVATE KEY----- ' in private_key:
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
-            
-            if '-----BEGIN PRIVATE KEY-----' not in private_key or '-----END PRIVATE KEY-----' not in private_key:
-                raise ValueError("private_key לא תקין - חסרים BEGIN/END markers")
-            
-            if '\n' not in private_key:
-                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
-                end_idx = private_key.find('-----END PRIVATE KEY-----')
-                if begin_idx >= 0 and end_idx > begin_idx:
-                    begin_marker = '-----BEGIN PRIVATE KEY-----'
-                    end_marker = '-----END PRIVATE KEY-----'
-                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
-                    key_content = key_content.replace(' ', '')
-                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
-                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
-            
-            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
-            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
-                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
-            
-            creds_dict['private_key'] = private_key
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
-    
-    required_fields = ['type', 'project_id', 'private_key', 'client_email']
-    missing_fields = [f for f in required_fields if f not in creds_dict]
-    if missing_fields:
-        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
-    
-    try:
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(credentials)
-        return client
-    except Exception as e:
-        raise ValueError(f"Error creating gspread client: {str(e)}")
-
-def col_number_to_letter(col_num):
-    """Convert column number (1-based) to Excel-style letter (A, B, ..., Z, AA, AB, ...)"""
-    result = ""
-    while col_num > 0:
-        col_num -= 1
-        result = chr(65 + (col_num % 26)) + result
-        col_num //= 26
-    return result
-
 def verify_mark_paid_token(order_num, row_index, token):
     """Verify the mark-as-paid token - requires SESSION_SECRET to be set"""
     secret = os.environ.get('SESSION_SECRET')
@@ -1472,26 +1110,11 @@ mark_paid_order = query_params.get('mark_paid', None)
 mark_paid_row = query_params.get('row', None)
 mark_paid_token = query_params.get('token', None)
 
-if mark_paid_order and mark_paid_row:
+if mark_paid_order and mark_paid_row and mark_paid_token:
     try:
         row_index = int(mark_paid_row)
         
-        # Verify token if provided, but allow without token if SESSION_SECRET is not set
-        token_valid = True
-        if mark_paid_token:
-            token_valid = verify_mark_paid_token(mark_paid_order, row_index, mark_paid_token)
-        else:
-            # If no token provided, check if SESSION_SECRET exists (for security)
-            secret = os.environ.get('SESSION_SECRET')
-            if secret and len(secret) >= 10:
-                # SESSION_SECRET exists but no token provided - this is less secure
-                # Allow it but show a warning
-                token_valid = True
-            else:
-                # No SESSION_SECRET, so no token needed
-                token_valid = True
-        
-        if not token_valid:
+        if not verify_mark_paid_token(mark_paid_order, row_index, mark_paid_token):
             st.error("קישור לא תקין - אין הרשאה לעדכן")
             st.query_params.clear()
         else:
@@ -1552,24 +1175,10 @@ if mark_paid_order and mark_paid_row:
                         }]
                         sheet.batch_update({'requests': requests_batch})
                         
-                        st.success(f"✅ הסטטוס של הזמנה {mark_paid_order} עודכן ל-Done!")
+                        st.success(f"הסטטוס של הזמנה {mark_paid_order} עודכן ל-Done!")
                         st.balloons()
                         
-                        # Clear cache to refresh data
-                        if hasattr(st, 'cache_data'):
-                            st.cache_data.clear()
-                        
-                        # Set session state to show this order after refresh
-                        st.session_state['highlight_order'] = mark_paid_order
-                        st.session_state['show_order_search'] = True
-                        st.session_state['sidebar_search_query'] = str(mark_paid_order)
-                        
-                        # Clear query params but keep the search active
-                        # This will trigger a search for the order
                         st.query_params.clear()
-                        
-                        # Rerun to show the updated order
-                        st.rerun()
                     else:
                         st.error("לא נמצאה עמודת סטטוס בגיליון")
             else:
@@ -1672,6 +1281,9 @@ else:
         }
     </style>
     """, unsafe_allow_html=True)
+
+SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
+WORKSHEET_INDEX = 0
 
 TRANSLATIONS = {
     "en": {
@@ -1853,8 +1465,273 @@ def normalize_order_number(order_num):
     
     return cleaned
 
-# get_gspread_client is already defined above (before mark_paid code)
-# Removed duplicate definition here
+def get_gspread_client():
+    """Create and return a gspread client using credentials from environment."""
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # Try to get from Streamlit secrets first (if available)
+    creds_json = None
+    try:
+        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
+            creds_json = st.secrets['GOOGLE_CREDENTIALS']
+    except:
+        pass
+    
+    # Fallback to environment variable
+    if not creds_json:
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
+    if not creds_json:
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
+    
+    # Handle different input formats
+    try:
+        if isinstance(creds_json, dict):
+            # Already a dictionary (from Streamlit secrets)
+            creds_dict = creds_json
+        elif isinstance(creds_json, str):
+            # Parse JSON string
+            creds_dict = json.loads(creds_json)
+        else:
+            # Try to convert to dict
+            creds_dict = dict(creds_json)
+        
+        # Ensure private_key is properly formatted (handle escaped newlines)
+        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
+            private_key = creds_dict['private_key']
+            original_key = private_key  # Keep original for debugging
+            
+            # Step 1: Handle escaped newlines - convert \n (two characters: backslash + n) to actual newline
+            # This is critical - JSON strings have "\\n" which needs to become actual "\n"
+            # Handle all variations: \n, \\n, \\\n, etc.
+            import re
+            # First, handle multiple backslashes (2+) followed by 'n' - do this BEFORE simple replace
+            # This handles cases like: \\n, \\\n, \\\\n, etc. -> all become actual newline
+            private_key = re.sub(r'\\{2,}n', '\n', private_key)
+            
+            # Then handle single escaped newline (\n -> actual newline)
+            # This handles the standard case where JSON has "\n" as a string
+            if '\\n' in private_key:
+                private_key = private_key.replace('\\n', '\n')
+            
+            # Step 2: Handle case where newlines might have been converted to spaces
+            # Sometimes when loading from Streamlit Secrets, newlines become spaces
+            # Check if BEGIN is followed by space instead of newline
+            if '-----BEGIN PRIVATE KEY----- ' in private_key:
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
+            
+            # Step 3: Ensure proper format - the key should have newlines
+            # Verify BEGIN and END markers exist
+            if '-----BEGIN PRIVATE KEY-----' not in private_key:
+                raise ValueError(
+                    "private_key לא מכיל '-----BEGIN PRIVATE KEY-----'.\n"
+                    f"המפתח מתחיל ב: {private_key[:100] if len(private_key) > 100 else private_key}..."
+                )
+            
+            if '-----END PRIVATE KEY-----' not in private_key:
+                raise ValueError(
+                    "private_key לא מכיל '-----END PRIVATE KEY-----'.\n"
+                    f"המפתח מסתיים ב: ...{private_key[-100:] if len(private_key) > 100 else private_key}"
+                )
+            
+            # Step 4: Ensure there are actual newlines in the key
+            # The key MUST have newlines - if not, try to fix it
+            if '\n' not in private_key:
+                # Try to reconstruct with newlines
+                # Split by BEGIN and END markers
+                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
+                end_idx = private_key.find('-----END PRIVATE KEY-----')
+                
+                if begin_idx >= 0 and end_idx > begin_idx:
+                    begin_marker = '-----BEGIN PRIVATE KEY-----'
+                    end_marker = '-----END PRIVATE KEY-----'
+                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
+                    # Remove any spaces and reconstruct with newlines every 64 chars (standard PEM format)
+                    key_content = key_content.replace(' ', '')
+                    # Reconstruct with newlines every 64 characters
+                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
+                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
+                else:
+                    raise ValueError(
+                        "private_key לא מכיל newlines אמיתיים ולא ניתן לתקן אוטומטית.\n"
+                        "ודא שה-private_key ב-JSON כולל \\n (escaped newlines)."
+                    )
+            
+            # Step 5: Additional validation
+            if len(private_key) < 100:
+                raise ValueError(
+                    "private_key נראה קצר מדי - ודא שהעתקת את כל המפתח מה-JSON file."
+                )
+            
+            # Step 6: Final format check - ensure newlines are present after BEGIN and before END
+            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
+                # Try to fix if missing newline after BEGIN
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
+            
+            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
+                # Try to fix if missing newline before END
+                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
+            
+            creds_dict['private_key'] = private_key
+        
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
+    
+    # Validate required fields
+    required_fields = ['type', 'project_id', 'private_key', 'client_email']
+    missing_fields = [f for f in required_fields if f not in creds_dict]
+    if missing_fields:
+        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
+    
+    try:
+        # Create a copy to avoid modifying the original
+        creds_dict_copy = creds_dict.copy()
+        
+        # Final validation and fix of private_key before passing to oauth2client
+        if 'private_key' in creds_dict_copy:
+            pk = creds_dict_copy['private_key']
+            
+            # Ensure it's a string
+            if not isinstance(pk, str):
+                raise ValueError(f"private_key צריך להיות string, אבל קיבלנו: {type(pk)}")
+            
+            # CRITICAL FIX: The private_key might be corrupted or incomplete
+            # Let's ensure it's properly formatted
+            
+            # 1. Remove any leading/trailing whitespace
+            pk = pk.strip()
+            
+            # 2. Ensure BEGIN marker is at the start
+            if not pk.startswith('-----BEGIN'):
+                begin_idx = pk.find('-----BEGIN')
+                if begin_idx > 0:
+                    pk = pk[begin_idx:]
+            
+            # 3. Ensure END marker is at the end
+            if not pk.rstrip().endswith('-----END PRIVATE KEY-----'):
+                end_idx = pk.rfind('-----END PRIVATE KEY-----')
+                if end_idx > 0:
+                    pk = pk[:end_idx + len('-----END PRIVATE KEY-----')]
+            
+            # 4. Verify the key is complete - check length (should be ~1600-1700 chars for RSA key)
+            if len(pk) < 1000:
+                raise ValueError(
+                    f"private_key נראה קצר מדי ({len(pk)} תווים). המפתח צריך להיות ~1600 תווים.\n"
+                    "המפתח כנראה נחתך או לא הועתק במלואו."
+                )
+            
+            # 5. Verify BEGIN and END markers
+            if '-----BEGIN PRIVATE KEY-----' not in pk:
+                raise ValueError("private_key לא מכיל '-----BEGIN PRIVATE KEY-----'")
+            
+            if '-----END PRIVATE KEY-----' not in pk:
+                raise ValueError("private_key לא מכיל '-----END PRIVATE KEY-----'")
+            
+            # 6. Extract and validate the key content
+            begin_marker = '-----BEGIN PRIVATE KEY-----'
+            end_marker = '-----END PRIVATE KEY-----'
+            begin_idx = pk.find(begin_marker)
+            end_idx = pk.find(end_marker)
+            
+            if begin_idx < 0 or end_idx < 0 or end_idx <= begin_idx:
+                raise ValueError("private_key לא בפורמט תקין - בעיה במיקום BEGIN/END markers")
+            
+            # Extract the actual key content (between markers)
+            key_content = pk[begin_idx + len(begin_marker):end_idx].strip()
+            
+            # Remove all whitespace and newlines to get pure base64
+            key_content_clean = key_content.replace('\n', '').replace(' ', '').replace('\r', '')
+            
+            # Validate key content length (RSA private key should be ~1600-1700 base64 chars)
+            if len(key_content_clean) < 1000:
+                raise ValueError(
+                    f"תוכן המפתח קצר מדי ({len(key_content_clean)} תווים). המפתח כנראה לא שלם.\n"
+                    "ודא שהעתקת את כל המפתח מה-JSON file."
+                )
+            
+            # Reconstruct the key with proper PEM format
+            # PEM format: lines of 64 characters
+            key_lines = [key_content_clean[i:i+64] for i in range(0, len(key_content_clean), 64)]
+            pk = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
+            
+            # Update the dict with the fixed key
+            creds_dict_copy['private_key'] = pk
+        
+        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict_copy, scope)
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        error_msg = str(e)
+        error_type = type(e).__name__
+        
+        # Provide specific error messages for common issues
+        if "seekable bit stream" in error_msg.lower() or "unsupportedsubstrateerror" in error_msg.lower() or "substrateunderrun" in error_msg.lower():
+            # Check if we can see the private_key format
+            private_key_preview = ""
+            private_key_length = 0
+            if 'private_key' in creds_dict:
+                pk = str(creds_dict['private_key'])
+                private_key_length = len(pk)
+                if len(pk) > 0:
+                    preview = pk[:100] + "..." if len(pk) > 100 else pk
+                    private_key_preview = f"\n**תצוגה מקדימה של private_key:** {preview}\n**אורך המפתח:** {private_key_length} תווים"
+            
+            # Determine the specific issue
+            if "substrateunderrun" in error_msg.lower() or "short substrate" in error_msg.lower():
+                issue_desc = "ה-private_key לא שלם או נחתך - המפתח קצר מדי או פגום."
+                solution_extra = "\n**חשוב במיוחד:** ודא שהעתקת את כל המפתח במלואו - המפתח צריך להיות ~1600 תווים."
+            else:
+                issue_desc = "ה-private_key לא בפורמט הנכון."
+                solution_extra = ""
+            
+            detailed_msg = (
+                f"❌ **שגיאה בפורמט ה-private_key ב-GOOGLE_CREDENTIALS**\n\n"
+                f"**הבעיה:** {issue_desc}\n\n"
+                f"**פתרון:**\n"
+                f"1. פתח את הקובץ JSON המקורי מה-Google Cloud Console\n"
+                f"2. **העתק את כל התוכן** של הקובץ (כולל ה-private_key המלא)\n"
+                f"3. ב-Streamlit Cloud Secrets:\n"
+                f"   - לך ל-Settings > Secrets\n"
+                f"   - מחק את GOOGLE_CREDENTIALS הקיים\n"
+                f"   - הוסף מחדש עם כל ה-JSON המלא\n"
+                f"4. **ודא שה-private_key כולל `\\n` (escaped newlines) בתוך המחרוזת**\n"
+                f"5. שמור והפעל מחדש את האפליקציה\n\n"
+                f"{solution_extra}\n\n"
+                f"{private_key_preview}\n\n"
+                f"**סוג שגיאה:** {error_type}\n"
+                f"**פרטים:** {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        elif "invalid_grant" in error_msg.lower():
+            detailed_msg = (
+                f"אימות נכשל - האימות ל-Google API נכשל.\n"
+                f"בדוק שהחשבון השירות פעיל ושהמפתח לא פג תוקף.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        elif "invalid" in error_msg.lower():
+            detailed_msg = (
+                f"Credentials לא תקינים.\n"
+                f"בדוק את GOOGLE_CREDENTIALS ב-Streamlit Cloud Secrets.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
+        else:
+            # Generic error with full details
+            detailed_msg = (
+                f"שגיאה בחיבור ל-Google API.\n"
+                f"סוג שגיאה: {error_type}\n"
+                f"פרטים: {error_msg}"
+            )
+            raise ValueError(detailed_msg)
 
 def generate_order_number(df):
     """Generate new order number based on existing max"""
@@ -3201,7 +3078,8 @@ with st.sidebar:
     st.markdown("---")
     
     if st.button(t("refresh_data"), use_container_width=True):
-        clear_all_caches()
+        load_data_from_sheet.clear()
+        st.cache_data.clear()
         if 'sheet_error' in st.session_state:
             del st.session_state.sheet_error
         st.rerun()
@@ -3226,7 +3104,7 @@ with st.sidebar:
                     if len(updated_orders) > 15:
                         st.write(f"... {t('and_more')} {len(updated_orders) - 15}")
                     
-                    clear_all_caches()
+                    st.cache_data.clear()
                     import time
                     time.sleep(3)
                     st.rerun()
@@ -3253,7 +3131,7 @@ with st.sidebar:
                     if len(updated_orders) > 15:
                         st.write(f"... {t('and_more')} {len(updated_orders) - 15}")
                     
-                    clear_all_caches()
+                    st.cache_data.clear()
                     import time
                     time.sleep(3)
                     st.rerun()
@@ -3283,29 +3161,18 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 📧 שליחת דוחות למייל")
     
-    # Cache email report data to prevent reload on every rerun
-    if 'email_report_df' not in st.session_state or st.session_state.get('needs_data_refresh', False):
-        temp_df_for_email = load_data_from_sheet()
-        st.session_state.email_report_df = temp_df_for_email
-    else:
-        temp_df_for_email = st.session_state.email_report_df
-    
-    # Use on_change with empty callback to prevent rerun on selectbox/text_input change
-    def empty_callback_email():
-        pass  # Do nothing - prevent rerun
+    temp_df_for_email = load_data_from_sheet()
     
     report_type = st.selectbox(
         "בחר סוג דוח:",
-        options=["📋 כרטיסים לרכישה", "💰 מכירות יומי", "📊 מכירות שבועי", "🔴 הזמנות שלא שולמו"],
-        key="email_report_type_selector",
-        on_change=empty_callback_email
+        options=["📋 כרטיסים לרכישה", "💰 מכירות יומי", "📊 מכירות שבועי"],
+        key="email_report_type_selector"
     )
     
     email_recipient = st.text_input(
         "📬 שלח ל:",
         value=DEFAULT_NEW_ORDERS_EMAIL,
-        key="report_email_recipient",
-        on_change=empty_callback_email
+        key="report_email_recipient"
     )
     
     if report_type == "📋 כרטיסים לרכישה":
@@ -3337,15 +3204,10 @@ with st.sidebar:
         israel_tz = pytz.timezone('Israel')
         today = datetime.now(israel_tz).date()
         
-        # Use on_change with empty callback to prevent rerun on date input change
-        def empty_callback_date():
-            pass  # Do nothing - prevent rerun
-        
         selected_date = st.date_input(
             "בחר תאריך:",
             value=today,
-            key="daily_report_date_picker",
-            on_change=empty_callback_date
+            key="daily_report_date_picker"
         )
         selected_date_str = selected_date.strftime('%d/%m/%Y')
         
@@ -3395,23 +3257,17 @@ with st.sidebar:
         default_end = default_start + timedelta(days=6)
         
         col_start, col_end = st.columns(2)
-        # Use on_change with empty callback to prevent rerun on date input change
-        def empty_callback_weekly():
-            pass  # Do nothing - prevent rerun
-        
         with col_start:
             start_of_week = st.date_input(
                 "מתאריך:",
                 value=default_start,
-                key="weekly_report_start_date",
-                on_change=empty_callback_weekly
+                key="weekly_report_start_date"
             )
         with col_end:
             end_of_week = st.date_input(
                 "עד תאריך:",
                 value=default_end,
-                key="weekly_report_end_date",
-                on_change=empty_callback_weekly
+                key="weekly_report_end_date"
             )
         
         weekly_orders = pd.DataFrame()
@@ -3452,58 +3308,6 @@ with st.sidebar:
         else:
             st.caption(f"אין מכירות בתקופה זו")
     
-    elif report_type == "🔴 הזמנות שלא שולמו":
-        unpaid_orders_for_email = pd.DataFrame()
-        if not temp_df_for_email.empty and 'orderd' in temp_df_for_email.columns:
-            # Find orders with status 'sent_not_paid', 'sent - not paid', or 'נשלח ולא שולם'
-            status_mask = (
-                temp_df_for_email['orderd'].fillna('').str.strip().str.lower().str.contains('sent_not_paid', na=False) |
-                temp_df_for_email['orderd'].fillna('').str.strip().str.lower().str.contains('sent - not paid', na=False) |
-                temp_df_for_email['orderd'].fillna('').str.strip().str.contains('נשלח ולא שולם', na=False)
-            )
-            unpaid_orders_for_email = temp_df_for_email[status_mask].copy()
-            
-            # Ensure row_index exists - it should already be there from load_data_from_sheet, but double-check
-            if 'row_index' not in unpaid_orders_for_email.columns and not unpaid_orders_for_email.empty:
-                # Re-add row_index if missing (shouldn't happen, but just in case)
-                unpaid_orders_for_email = unpaid_orders_for_email.copy()
-                # Use the original index from temp_df_for_email to calculate row_index
-                for idx, row in unpaid_orders_for_email.iterrows():
-                    if idx in temp_df_for_email.index:
-                        original_row_idx = temp_df_for_email.loc[idx, 'row_index'] if 'row_index' in temp_df_for_email.columns else idx + 2
-                        unpaid_orders_for_email.at[idx, 'row_index'] = original_row_idx
-                    else:
-                        unpaid_orders_for_email.at[idx, 'row_index'] = idx + 2
-        
-        unpaid_count = len(unpaid_orders_for_email)
-        unpaid_tickets = int(pd.to_numeric(unpaid_orders_for_email.get('Qty', 0), errors='coerce').sum()) if not unpaid_orders_for_email.empty else 0
-        
-        # Calculate total amount
-        total_amount = 0
-        if not unpaid_orders_for_email.empty and 'TOTAL' in unpaid_orders_for_email.columns:
-            for total_val in unpaid_orders_for_email['TOTAL']:
-                if total_val and total_val != '-':
-                    try:
-                        amount = float(str(total_val).replace('€','').replace('£','').replace('$','').replace(',','').strip())
-                        total_amount += amount
-                    except:
-                        pass
-        
-        if unpaid_count > 0:
-            st.info(f"🔴 {unpaid_count} הזמנות ({unpaid_tickets} כרטיסים) | סה״כ לגבייה: €{total_amount:,.2f}")
-            if st.button("📤 שלח דוח הזמנות שלא שולמו", use_container_width=True, type="primary", key="send_unpaid_orders_btn"):
-                if email_recipient and '@' in email_recipient:
-                    with st.spinner("שולח מייל..."):
-                        success, message = send_unpaid_orders_report_email(unpaid_orders_for_email, email_recipient)
-                        if success:
-                            st.success(f"✅ {message}")
-                        else:
-                            st.error(f"❌ {message}")
-                else:
-                    st.error("❌ כתובת מייל לא תקינה")
-        else:
-            st.caption("✅ אין הזמנות שלא שולמו")
-    
     st.markdown("---")
     st.markdown("**🔍 חיפוש מהיר**")
     sidebar_search_input = st.text_input(
@@ -3513,17 +3317,6 @@ with st.sidebar:
         key="sidebar_search_input_box",
         label_visibility="collapsed"
     )
-    
-    # Auto-search if order was just marked as paid
-    if st.session_state.get('show_order_search', False) and st.session_state.get('highlight_order'):
-        order_to_show = str(st.session_state.get('highlight_order', ''))
-        if order_to_show:
-            st.session_state.sidebar_search_query = order_to_show
-            st.session_state.show_global_search = True
-            st.session_state.show_manual_order_form = False
-            # Clear the flag so it doesn't keep searching
-            st.session_state.show_order_search = False
-            st.rerun()
     
     if st.button("🔍 חפש", use_container_width=True, type="primary"):
         if sidebar_search_input and len(sidebar_search_input.strip()) >= 2:
@@ -3540,13 +3333,7 @@ with st.sidebar:
     st.markdown("---")
     st.subheader(t("filters"))
     
-    # Cache df in session_state to prevent reload on every rerun
-    if 'main_df' not in st.session_state or st.session_state.get('needs_data_refresh', False):
-        with st.spinner("טוען נתונים..."):
-            st.session_state.main_df = load_data_from_sheet()
-            st.session_state.needs_data_refresh = False
-    
-    df = st.session_state.main_df
+    df = load_data_from_sheet()
     
     # Initialize filter session state
     if 'filter_events' not in st.session_state:
@@ -4211,12 +3998,7 @@ if df.empty:
 now = datetime.now()
 status_col = 'orderd' if 'orderd' in df.columns else None
 
-# Cache has_supplier_data to prevent recalculation on every rerun
-if 'df_has_supplier_data' not in st.session_state or st.session_state.get('needs_data_refresh', False):
-    df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
-    st.session_state.df_has_supplier_data = df['has_supplier_data'].copy()
-else:
-    df['has_supplier_data'] = st.session_state.df_has_supplier_data
+df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
 
 supp_name_col = 'Supplier NAME' if 'Supplier NAME' in df.columns else None
 supp_order_col = None
@@ -4228,45 +4010,17 @@ for col in df.columns:
 week_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 week_end = week_start + timedelta(days=7)
 
-# Cache expensive calculations to prevent recalculation on every rerun
-cache_key_metrics = f"metrics_{hash(str(df.index.tolist()[:10]))}"
-if cache_key_metrics not in st.session_state or st.session_state.get('needs_data_refresh', False):
-    total_orders = len(df)
-    total_tickets = pd.to_numeric(df.get('Qty', 0), errors='coerce').sum()
-    total_sales = df['TOTAL_clean'].sum()
-    total_supp_cost = df[df['has_supplier_data'] == True]['SUPP_PRICE_clean'].sum()
-    total_profit = df[df['has_supplier_data'] == True]['profit'].sum()
-    profit_pct = (total_profit / total_sales * 100) if total_sales > 0 else 0
-    
-    new_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'new']) if status_col else 0
-    orderd_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'orderd']) if status_col else 0
-    done_count = len(df[df[status_col].fillna('').str.lower().str.strip().isin(['done!', 'done'])]) if status_col else 0
-    needs_attention = len(df[(df['has_supplier_data'] == False) & (df[status_col].fillna('').str.lower().str.strip() == 'new')]) if status_col else 0
-    
-    st.session_state[cache_key_metrics] = {
-        'total_orders': total_orders,
-        'total_tickets': total_tickets,
-        'total_sales': total_sales,
-        'total_supp_cost': total_supp_cost,
-        'total_profit': total_profit,
-        'profit_pct': profit_pct,
-        'new_count': new_count,
-        'orderd_count': orderd_count,
-        'done_count': done_count,
-        'needs_attention': needs_attention
-    }
-else:
-    metrics = st.session_state[cache_key_metrics]
-    total_orders = metrics['total_orders']
-    total_tickets = metrics['total_tickets']
-    total_sales = metrics['total_sales']
-    total_supp_cost = metrics['total_supp_cost']
-    total_profit = metrics['total_profit']
-    profit_pct = metrics['profit_pct']
-    new_count = metrics['new_count']
-    orderd_count = metrics['orderd_count']
-    done_count = metrics['done_count']
-    needs_attention = metrics['needs_attention']
+total_orders = len(df)
+total_tickets = pd.to_numeric(df.get('Qty', 0), errors='coerce').sum()
+total_sales = df['TOTAL_clean'].sum()
+total_supp_cost = df[df['has_supplier_data'] == True]['SUPP_PRICE_clean'].sum()
+total_profit = df[df['has_supplier_data'] == True]['profit'].sum()
+profit_pct = (total_profit / total_sales * 100) if total_sales > 0 else 0
+
+new_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'new']) if status_col else 0
+orderd_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'orderd']) if status_col else 0
+done_count = len(df[df[status_col].fillna('').str.lower().str.strip().isin(['done!', 'done'])]) if status_col else 0
+needs_attention = len(df[(df['has_supplier_data'] == False) & (df[status_col].fillna('').str.lower().str.strip() == 'new')]) if status_col else 0
 
 if 'dashboard_filter' not in st.session_state:
     st.session_state.dashboard_filter = None
@@ -4579,31 +4333,34 @@ if st.session_state.get('show_manual_order_form', False):
 סטטוס: {add_status}"""
             st.code(order_summary, language="text")
         
-        # Handle form submission
-        if submitted:
-            submit_datetime = datetime.now().strftime("%d/%m/%Y %H:%M")
-            if not add_event_name:
-                st.error("❌ בחר או הזן אירוע")
-            elif not add_final_source:
-                st.error("❌ בחר או הזן מקור")
-            elif add_price <= 0:
-                st.error("❌ הזן מחיר")
-            else:
-                order_data = {
-                    'order date': submit_datetime,
-                    'orderd': add_status,
-                    'source': add_final_source,
-                    'Order number': add_order_number,
-                    'docket number': add_docket,
-                    'event name': add_event_name,
-                    'Date of the event': add_event_date,
-                    'Category / Section': add_category,
-                    'Qty': add_qty,
-                    'Price sold': f"{add_currency}{add_price:.2f}",
-                    'TOTAL': f"{add_currency}{add_total:.2f}",
-                }
-                
-                with st.spinner("מוסיף..."):
+        st.markdown("---")
+        btn_col1, btn_col2, btn_col3 = st.columns([2, 1, 1])
+        
+        with btn_col1:
+            if st.button("✅ הוסף הזמנה", key="main_add_order", type="primary", use_container_width=True):
+                submit_datetime = datetime.now().strftime("%d/%m/%Y %H:%M")
+                if not add_event_name:
+                    st.error("❌ בחר או הזן אירוע")
+                elif not add_final_source:
+                    st.error("❌ בחר או הזן מקור")
+                elif add_price <= 0:
+                    st.error("❌ הזן מחיר")
+                else:
+                    order_data = {
+                        'order date': submit_datetime,
+                        'orderd': add_status,
+                        'source': add_final_source,
+                        'Order number': add_order_number,
+                        'docket number': add_docket,
+                        'event name': add_event_name,
+                        'Date of the event': add_event_date,
+                        'Category / Section': add_category,
+                        'Qty': add_qty,
+                        'Price sold': f"{add_currency}{add_price:.2f}",
+                        'TOTAL': f"{add_currency}{add_total:.2f}",
+                    }
+                    
+                    with st.spinner("מוסיף..."):
                         success, message = add_new_order_to_sheet(order_data)
                         if success:
                             email_sent_msg = ""
@@ -5659,27 +5416,14 @@ with tab1:
                             
                             show_cols = ['Select'] + available_cols
                             
-                            # Store previous state to detect changes
-                            editor_key = f"editor_{key}"
-                            
-                            # Use data_editor without assignment first, then get value from session_state
-                            st.data_editor(
+                            edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=column_config,
                                 disabled=non_editable_cols + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=editor_key
+                                key=f"editor_{key}"
                             )
-                            
-                            # Get edited data from session_state if available
-                            if editor_key in st.session_state and st.session_state[editor_key] is not None:
-                                edited_df = st.session_state[editor_key]
-                            else:
-                                edited_df = display_df[show_cols + ['row_index']].copy()
-                            
-                            # Only process if button clicked, not on every edit
-                            # The button click will trigger the save logic
                             
                             btn_cols = st.columns([2, 2, 2, 1])
                             with btn_cols[0]:
@@ -5714,14 +5458,18 @@ with tab1:
                                                 changes_made += 1
                                     
                                     if changes_made > 0:
-                                        clear_all_caches()
+                                        st.cache_data.clear()
                                         st.success(f"✅ עודכנו {changes_made} שורות!")
                                         st.rerun()
                                     else:
                                         st.info("לא זוהו שינויים")
                             
                             with btn_cols[1]:
-                                selected = edited_df[edited_df['Select'] == True]
+                                # Safety check: ensure 'Select' column exists
+                                if not edited_df.empty and 'Select' in edited_df.columns:
+                                    selected = edited_df[edited_df['Select'] == True]
+                                else:
+                                    selected = pd.DataFrame()
                                 if len(selected) > 0:
                                     if st.button(f"🛒 סמן {len(selected)} כהוזמן", key=f"mark_orderd_{key}", type="secondary"):
                                         row_indices = selected['row_index'].tolist()
@@ -5729,11 +5477,15 @@ with tab1:
                                             success = update_sheet_status(row_indices, "orderd")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות לסטטוס הוזמן!")
-                                            clear_all_caches()
+                                            st.cache_data.clear()
                                             st.rerun()
                             
                             with btn_cols[2]:
-                                selected = edited_df[edited_df['Select'] == True]
+                                # Safety check: ensure 'Select' column exists
+                                if not edited_df.empty and 'Select' in edited_df.columns:
+                                    selected = edited_df[edited_df['Select'] == True]
+                                else:
+                                    selected = pd.DataFrame()
                                 if len(selected) > 0:
                                     if st.button(f"📤 סמן {len(selected)} כנשלח", key=f"mark_sent_{key}", type="primary"):
                                         row_indices = selected['row_index'].tolist()
@@ -5741,7 +5493,7 @@ with tab1:
                                             success = update_sheet_status(row_indices, "done!")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות לסטטוס נשלח!")
-                                            clear_all_caches()
+                                            st.cache_data.clear()
                                             st.rerun()
                                     
                                     if st.button(f"⚠️ נשלח ולא שולם ({len(selected)})", key=f"mark_sent_not_paid_{key}"):
@@ -6237,24 +5989,20 @@ with tab3:
                             
                             show_cols = ['Select'] + available_cols
                             
-                            # Store previous state to detect changes
-                            op_editor_key = f"op_editor_{key}"
-                            
-                            # st.data_editor automatically manages session_state with the key
-                            # We just need to get the return value directly
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=op_column_config,
                                 disabled=[col for col in show_cols if col != 'Select'] + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=op_editor_key
+                                key=f"op_editor_{key}"
                             )
                             
-                            # Only process if button clicked, not on every edit
-                            # The button click will trigger the save logic
-                            
-                            selected = edited_df[edited_df['Select'] == True]
+                            # Safety check: ensure 'Select' column exists
+                            if not edited_df.empty and 'Select' in edited_df.columns:
+                                selected = edited_df[edited_df['Select'] == True]
+                            else:
+                                selected = pd.DataFrame()
                             if len(selected) > 0:
                                 btn_cols = st.columns([2, 1, 1])
                                 with btn_cols[0]:
@@ -6264,7 +6012,7 @@ with tab3:
                                             success = update_sheet_status(row_indices, "done!")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות!")
-                                            clear_all_caches()
+                                            st.cache_data.clear()
                                             st.rerun()
                     
                     st.markdown("---")
@@ -6277,37 +6025,21 @@ with tab4:
     st.header("🆕 הזמנות חדשות לטיפול")
     st.markdown("*כל ההזמנות עם סטטוס 'New' או ללא סטטוס - עדכן מספר הזמנה ספק וסטטוס*")
     
-    # Use session state to cache data and prevent reload on every rerun
-    # Only reload if explicitly requested or if data doesn't exist
-    if 'tab4_fresh_df' not in st.session_state or st.session_state.get('tab4_needs_refresh', False):
-        with st.spinner("טוען נתונים..."):
-            st.session_state.tab4_fresh_df = load_data_from_sheet()
-            st.session_state.tab4_needs_refresh = False
-    
-    fresh_df = st.session_state.tab4_fresh_df
+    # Load FRESH data directly - ignore sidebar filters
+    fresh_df = load_data_from_sheet()
     tab4_status_col = 'orderd' if 'orderd' in fresh_df.columns else None
     
     if tab4_status_col:
-        # Cache filtered and sorted data to prevent recalculation on every rerun
-        # Use a hash of the dataframe to detect changes
-        df_hash = hash(str(fresh_df.index.tolist()[:10]) + str(fresh_df[tab4_status_col].iloc[:10].tolist()))
-        cache_key_all_new = f"tab4_all_new_orders_{df_hash}"
+        # Filter for new or empty status
+        status_values = fresh_df[tab4_status_col].fillna('').astype(str).str.strip()
+        all_new_orders = fresh_df[(status_values.str.lower() == 'new') | (status_values == '')].copy()
         
-        if cache_key_all_new not in st.session_state or st.session_state.get('tab4_needs_refresh', False):
-            # Filter for new or empty status
-            status_values = fresh_df[tab4_status_col].fillna('').astype(str).str.strip()
-            all_new_orders = fresh_df[(status_values.str.lower() == 'new') | (status_values == '')].copy()
-            
-            # Sort by row index (descending) to get newest entries first
-            if 'row_index' in all_new_orders.columns:
-                all_new_orders = all_new_orders.sort_values('row_index', ascending=False)
-            elif 'Order number' in all_new_orders.columns:
-                all_new_orders['order_num_sort'] = pd.to_numeric(all_new_orders['Order number'], errors='coerce')
-                all_new_orders = all_new_orders.sort_values('order_num_sort', ascending=False, na_position='last')
-            
-            st.session_state[cache_key_all_new] = all_new_orders
-        else:
-            all_new_orders = st.session_state[cache_key_all_new]
+        # Sort by row index (descending) to get newest entries first
+        if 'row_index' in all_new_orders.columns:
+            all_new_orders = all_new_orders.sort_values('row_index', ascending=False)
+        elif 'Order number' in all_new_orders.columns:
+            all_new_orders['order_num_sort'] = pd.to_numeric(all_new_orders['Order number'], errors='coerce')
+            all_new_orders = all_new_orders.sort_values('order_num_sort', ascending=False, na_position='last')
         
         if not all_new_orders.empty:
             st.success(f"📋 **{len(all_new_orders)} הזמנות חדשות** לטיפול")
@@ -6315,156 +6047,129 @@ with tab4:
             # Refresh button
             if st.button("🔄 רענן נתונים", key="refresh_new_orders"):
                 st.cache_data.clear()
-                # Clear cached filtered data
-                for key in list(st.session_state.keys()):
-                    if key.startswith('tab4_all_new_orders_'):
-                        del st.session_state[key]
-                st.session_state.tab4_needs_refresh = True
                 st.rerun()
             
             st.markdown("---")
             
-            # Use st.fragment to prevent full app rerun when typing in forms
-            # This is the REAL solution - fragments rerun independently
-            @st.fragment
-            def render_order_forms(orders_df):
-                for idx, (_, order) in enumerate(orders_df.iterrows()):
-                    order_num = order.get('Order number', '-')
-                    event_name = str(order.get('event name', '-'))[:50]
-                    event_date = order.get('Date of the event', '-')
-                    order_date = order.get('order date', '-')
-                    qty = order.get('Qty', '-')
-                    total = order.get('TOTAL', '-')
-                    source = order.get('source', '-')
-                    current_supp_order = str(order.get('SUPP order number', '')).strip()
-                    current_status = str(order.get(tab4_status_col, '')).strip()
-                    row_idx = order.get('row_index', None)
-                    category = order.get('Category / Section', '-')
+            for idx, (_, order) in enumerate(all_new_orders.iterrows()):
+                order_num = order.get('Order number', '-')
+                event_name = str(order.get('event name', '-'))[:50]
+                event_date = order.get('Date of the event', '-')
+                order_date = order.get('order date', '-')
+                qty = order.get('Qty', '-')
+                total = order.get('TOTAL', '-')
+                source = order.get('source', '-')
+                current_supp_order = str(order.get('SUPP order number', '')).strip()
+                current_status = str(order.get(tab4_status_col, '')).strip()
+                row_idx = order.get('row_index', None)
+                category = order.get('Category / Section', '-')
+                
+                is_ordered = current_status.lower() == 'orderd'
+                
+                with st.container(border=True):
+                    if is_ordered:
+                        st.markdown("""
+                        <style>
+                        div[data-testid="stVerticalBlockBorderWrapper"]:has(h3:contains("הזמנה")) {
+                            background-color: rgba(56, 189, 248, 0.15) !important;
+                        }
+                        </style>
+                        <div style="background-color: rgba(56, 189, 248, 0.15); margin: -1rem; padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem;">
+                        <h4 style="margin:0; color: #0284c7;">🎫 הזמנה #""" + str(order_num) + """ ✓ הוזמן</h4>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
+                    else:
+                        st.markdown(f"### 🎫 הזמנה #{order_num}")
+                        st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
                     
-                    is_ordered = current_status.lower() == 'orderd'
-                    
-                    with st.container(border=True):
-                        if is_ordered:
-                            st.markdown("""
-                            <style>
-                            div[data-testid="stVerticalBlockBorderWrapper"]:has(h3:contains("הזמנה")) {
-                                background-color: rgba(56, 189, 248, 0.15) !important;
-                            }
-                            </style>
-                            <div style="background-color: rgba(56, 189, 248, 0.15); margin: -1rem; padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem;">
-                            <h4 style="margin:0; color: #0284c7;">🎫 הזמנה #""" + str(order_num) + """ ✓ הוזמן</h4>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
-                        else:
-                            st.markdown(f"### 🎫 הזמנה #{order_num}")
-                            st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
-                        
-                        # Use form to prevent rerun on input change - only update on button click
-                        with st.form(key=f"order_form_{idx}_{order_num}", clear_on_submit=False):
-                            col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
-                            with col1:
-                                new_supp_order = st.text_input(
-                                    "מס' הזמנה ספק",
-                                    value=current_supp_order,
-                                    key=f"tab4_supp_{idx}_{order_num}",
-                                    placeholder="הכנס מספר הזמנה ספק"
-                                )
-                            with col2:
-                                status_options = ['new', 'orderd', 'done!', 'old no data']
-                                current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
-                                new_status = st.selectbox(
-                                    "סטטוס",
-                                    options=status_options,
-                                    index=current_idx,
-                                    key=f"tab4_status_{idx}_{order_num}"
-                                )
-                            with col3:
-                                supp_price_val = order.get('SUPP PRICE', '')
-                                new_supp_price = st.text_input(
-                                    "מחיר ספק",
-                                    value=str(supp_price_val) if supp_price_val else "",
-                                    key=f"tab4_price_{idx}_{order_num}",
-                                    placeholder="מחיר"
-                                )
-                            with col4:
-                                st.write("")
-                                st.write("")
-                                save_clicked = st.form_submit_button("💾 שמור", type="primary", use_container_width=True)
-                            with col5:
-                                st.write("")
-                                st.write("")
-                                delete_clicked = st.form_submit_button("🗑️ מחק", type="secondary", use_container_width=True)
-                            
-                            # Handle save button click INSIDE form
-                            if save_clicked:
-                                if row_idx:
-                                    try:
-                                        client = get_gspread_client()
-                                        sheet = client.open(SHEET_NAME)
-                                        worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
-                                        headers = worksheet.row_values(1)
-                                        
-                                        supp_order_col_idx = None
-                                        status_col_idx = None
-                                        supp_price_col_idx = None
-                                        for i, h in enumerate(headers):
-                                            h_lower = h.strip().lower()
-                                            if h_lower in ['supp order number', 'supp order']:
-                                                supp_order_col_idx = i + 1
-                                            if h_lower == 'orderd':
-                                                status_col_idx = i + 1
-                                            if h_lower == 'supp price':
-                                                supp_price_col_idx = i + 1
-                                        
-                                        updates = []
-                                        if supp_order_col_idx and new_supp_order != current_supp_order:
-                                            col_letter = col_number_to_letter(supp_order_col_idx)
-                                            updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_order]]})
-                                        
-                                        if status_col_idx and new_status != current_status:
-                                            col_letter = col_number_to_letter(status_col_idx)
-                                            updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_status]]})
-                                        
-                                        if supp_price_col_idx and new_supp_price and new_supp_price != str(supp_price_val):
-                                            col_letter = col_number_to_letter(supp_price_col_idx)
-                                            updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_price]]})
-                                        
-                                        if updates:
-                                            worksheet.batch_update(updates)
-                                            st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
-                                            st.cache_data.clear()
-                                            st.session_state.tab4_needs_refresh = True
-                                            time.sleep(0.5)
-                                            st.rerun()
-                                        else:
-                                            st.info("אין שינויים לשמור")
-                                    except Exception as e:
-                                        st.error(f"שגיאה: {str(e)}")
-                                else:
-                                    st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
-                        
-                        # Handle delete button click INSIDE form to prevent rerun
-                        if delete_clicked:
+                    col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
+                    with col1:
+                        new_supp_order = st.text_input(
+                            "מס' הזמנה ספק",
+                            value=current_supp_order,
+                            key=f"tab4_supp_{idx}_{order_num}",
+                            placeholder="הכנס מספר הזמנה ספק"
+                        )
+                    with col2:
+                        status_options = ['new', 'orderd', 'done!', 'old no data']
+                        current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
+                        new_status = st.selectbox(
+                            "סטטוס",
+                            options=status_options,
+                            index=current_idx,
+                            key=f"tab4_status_{idx}_{order_num}"
+                        )
+                    with col3:
+                        supp_price_val = order.get('SUPP PRICE', '')
+                        new_supp_price = st.text_input(
+                            "מחיר ספק",
+                            value=str(supp_price_val) if supp_price_val else "",
+                            key=f"tab4_price_{idx}_{order_num}",
+                            placeholder="מחיר"
+                        )
+                    with col4:
+                        st.write("")
+                        st.write("")
+                        if st.button("💾 שמור", key=f"tab4_save_{idx}_{order_num}", type="primary"):
+                            if row_idx:
+                                try:
+                                    client = get_gspread_client()
+                                    sheet = client.open(SHEET_NAME)
+                                    worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
+                                    headers = worksheet.row_values(1)
+                                    
+                                    supp_order_col_idx = None
+                                    status_col_idx = None
+                                    supp_price_col_idx = None
+                                    for i, h in enumerate(headers):
+                                        h_lower = h.strip().lower()
+                                        if h_lower in ['supp order number', 'supp order']:
+                                            supp_order_col_idx = i + 1
+                                        if h_lower == 'orderd':
+                                            status_col_idx = i + 1
+                                        if h_lower == 'supp price':
+                                            supp_price_col_idx = i + 1
+                                    
+                                    updates = []
+                                    if supp_order_col_idx and new_supp_order != current_supp_order:
+                                        col_letter = col_number_to_letter(supp_order_col_idx)
+                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_order]]})
+                                    
+                                    if status_col_idx and new_status != current_status:
+                                        col_letter = col_number_to_letter(status_col_idx)
+                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_status]]})
+                                    
+                                    if supp_price_col_idx and new_supp_price and new_supp_price != str(supp_price_val):
+                                        col_letter = col_number_to_letter(supp_price_col_idx)
+                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_price]]})
+                                    
+                                    if updates:
+                                        worksheet.batch_update(updates)
+                                        st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
+                                        st.cache_data.clear()
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.info("אין שינויים לשמור")
+                                except Exception as e:
+                                    st.error(f"שגיאה: {str(e)}")
+                            else:
+                                st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
+                    with col5:
+                        st.write("")
+                        st.write("")
+                        if st.button("🗑️ מחק", key=f"tab4_delete_{idx}_{order_num}", type="secondary"):
                             if row_idx:
                                 with st.spinner("מוחק הזמנה..."):
                                     success = delete_order_row(row_idx)
                                 if success:
                                     st.success(f"✅ הזמנה #{order_num} נמחקה!")
                                     st.cache_data.clear()
-                                    # Clear cached filtered data
-                                    for key in list(st.session_state.keys()):
-                                        if key.startswith('tab4_all_new_orders_'):
-                                            del st.session_state[key]
-                                    st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
                             else:
-                                st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
-            
-            # Call the fragment function to render all forms
-            # This prevents full app rerun when typing in form inputs
-            render_order_forms(all_new_orders)
+                                st.warning("לא נמצא מספר שורה")
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:
