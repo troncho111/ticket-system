@@ -3326,6 +3326,148 @@ if df.empty:
         st.error(st.session_state.sheet_error)
     
     st.warning(t("no_data"))
+    
+    # Diagnostic section
+    with st.expander("🔍 אבחון מפורט - בדיקת חיבור ל-Google Sheets", expanded=True):
+        diagnostic_results = {}
+        creds_dict = None  # Initialize for use in permission check
+        
+        # 1. Check GOOGLE_CREDENTIALS environment variable
+        st.subheader("1️⃣ בדיקת משתנה הסביבה GOOGLE_CREDENTIALS")
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+        if not creds_json:
+            st.error("❌ **GOOGLE_CREDENTIALS לא נמצא**")
+            st.info("💡 **פתרון:** הגדר את המשתנה ב-Streamlit Cloud Secrets:")
+            st.code("""
+1. לך ל-Streamlit Cloud Dashboard
+2. בחר את האפליקציה שלך
+3. לך ל-Settings > Secrets
+4. הוסף: GOOGLE_CREDENTIALS = {הקוד JSON המלא}
+            """)
+            diagnostic_results['credentials'] = False
+        else:
+            st.success("✅ **GOOGLE_CREDENTIALS נמצא**")
+            try:
+                if isinstance(creds_json, str):
+                    creds_dict = json.loads(creds_json)
+                else:
+                    creds_dict = dict(creds_json)
+                
+                # Check required fields
+                required_fields = ['type', 'project_id', 'private_key', 'client_email']
+                missing_fields = [f for f in required_fields if f not in creds_dict]
+                
+                if missing_fields:
+                    st.warning(f"⚠️ **שדות חסרים ב-JSON:** {', '.join(missing_fields)}")
+                    diagnostic_results['credentials'] = False
+                else:
+                    st.success(f"✅ **JSON תקין** - חשבון שירות: `{creds_dict.get('client_email', 'לא נמצא')}`")
+                    diagnostic_results['credentials'] = True
+            except json.JSONDecodeError as e:
+                st.error(f"❌ **JSON לא תקין:** {str(e)}")
+                diagnostic_results['credentials'] = False
+        
+        st.markdown("---")
+        
+        # 2. Check sheet name
+        st.subheader("2️⃣ בדיקת שם הגיליון")
+        expected_name = "מערכת הזמנות - קוד יהודה  "
+        st.info(f"**שם גיליון צפוי:** `{expected_name}` (עם 2 רווחים בסוף)")
+        st.write(f"**שם גיליון בקוד:** `{SHEET_NAME}`")
+        
+        if SHEET_NAME == expected_name:
+            st.success("✅ **שם הגיליון נכון**")
+            diagnostic_results['sheet_name'] = True
+        else:
+            st.warning(f"⚠️ **שם הגיליון שונה מהצפוי**")
+            st.code(f"SHEET_NAME = \"{expected_name}\"")
+            diagnostic_results['sheet_name'] = False
+        
+        st.markdown("---")
+        
+        # 3. Test connection and permissions
+        st.subheader("3️⃣ בדיקת חיבור והרשאות")
+        if diagnostic_results.get('credentials', False):
+            if st.button("🔌 בדוק חיבור", key="test_connection"):
+                with st.spinner("בודק חיבור ל-Google Sheets..."):
+                    try:
+                        client = get_gspread_client()
+                        st.success("✅ **חיבור ל-Google API הצליח**")
+                        
+                        # Try to open the sheet
+                        try:
+                            sheet = client.open(SHEET_NAME)
+                            st.success(f"✅ **גיליון נמצא:** `{SHEET_NAME}`")
+                            
+                            # Check worksheet
+                            try:
+                                worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
+                                st.success(f"✅ **גיליון עבודה #{WORKSHEET_INDEX} נטען בהצלחה**")
+                                
+                                # Try to read data
+                                try:
+                                    data = worksheet.get_all_values()
+                                    if len(data) > 0:
+                                        st.success(f"✅ **נתונים נקראו בהצלחה:** {len(data)} שורות")
+                                        if len(data) < 2:
+                                            st.warning("⚠️ **הגיליון ריק או יש רק כותרות**")
+                                        else:
+                                            st.info(f"📊 **כותרות:** {', '.join(data[0][:5])}...")
+                                    else:
+                                        st.warning("⚠️ **הגיליון ריק לחלוטין**")
+                                    
+                                    diagnostic_results['connection'] = True
+                                    diagnostic_results['permissions'] = True
+                                except Exception as e:
+                                    st.error(f"❌ **שגיאה בקריאת נתונים:** {str(e)}")
+                                    diagnostic_results['connection'] = False
+                            except Exception as e:
+                                st.error(f"❌ **שגיאה בטעינת גיליון עבודה:** {str(e)}")
+                                diagnostic_results['connection'] = False
+                        except gspread.exceptions.SpreadsheetNotFound:
+                            st.error(f"❌ **גיליון לא נמצא:** `{SHEET_NAME}`")
+                            st.info("💡 **פתרון:** ודא שהגיליון קיים ושם חשבון השירות יש לו גישה אליו")
+                            diagnostic_results['connection'] = False
+                        except gspread.exceptions.APIError as e:
+                            error_msg = str(e)
+                            if "PERMISSION_DENIED" in error_msg or "403" in error_msg:
+                                st.error(f"❌ **אין הרשאות לגיליון:** {error_msg}")
+                                st.info("💡 **פתרון:** שתף את הגיליון עם חשבון השירות:")
+                                if creds_dict and 'client_email' in creds_dict:
+                                    service_email = creds_dict.get('client_email', 'חשבון השירות')
+                                    st.code(f"1. פתח את הגיליון ב-Google Sheets\n2. לחץ על 'שתף' (Share)\n3. הוסף את: {service_email}\n4. תן הרשאות 'עורך' (Editor)")
+                                else:
+                                    st.code("1. פתח את הגיליון ב-Google Sheets\n2. לחץ על 'שתף' (Share)\n3. הוסף את כתובת האימייל של חשבון השירות\n4. תן הרשאות 'עורך' (Editor)")
+                                diagnostic_results['permissions'] = False
+                            else:
+                                st.error(f"❌ **שגיאת API:** {error_msg}")
+                                diagnostic_results['connection'] = False
+                    except Exception as e:
+                        st.error(f"❌ **שגיאה בחיבור:** {str(e)}")
+                        diagnostic_results['connection'] = False
+        else:
+            st.warning("⚠️ **לא ניתן לבדוק חיבור - GOOGLE_CREDENTIALS לא תקין**")
+        
+        st.markdown("---")
+        
+        # 4. Summary
+        st.subheader("📋 סיכום אבחון")
+        all_ok = all(diagnostic_results.values()) if diagnostic_results else False
+        
+        if all_ok:
+            st.success("✅ **כל הבדיקות עברו בהצלחה!**")
+        else:
+            st.warning("⚠️ **נמצאו בעיות שצריך לפתור:**")
+            for check, status in diagnostic_results.items():
+                icon = "✅" if status else "❌"
+                check_names = {
+                    'credentials': 'משתנה הסביבה GOOGLE_CREDENTIALS',
+                    'sheet_name': 'שם הגיליון',
+                    'connection': 'חיבור ל-Google Sheets',
+                    'permissions': 'הרשאות לגיליון'
+                }
+                st.write(f"{icon} {check_names.get(check, check)}: {'תקין' if status else 'בעיה'}")
+    
     st.info("💡 **טיפים לפתרון בעיות:**")
     st.markdown("""
     1. **בדוק את משתנה הסביבה GOOGLE_CREDENTIALS** - ודא שהוא מוגדר ב-Streamlit Cloud Secrets
@@ -3338,13 +3480,13 @@ if df.empty:
     # Add button to clear cache and retry
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🔄 נסה שוב", key="retry_load"):
+        if st.button("🔄 נסה שוב", key="retry_load", use_container_width=True):
             load_data_from_sheet.clear()
             if 'sheet_error' in st.session_state:
                 del st.session_state.sheet_error
             st.rerun()
     with col2:
-        if st.button("🗑️ נקה cache ונסה שוב", key="clear_cache_retry"):
+        if st.button("🗑️ נקה cache ונסה שוב", key="clear_cache_retry", use_container_width=True):
             load_data_from_sheet.clear()
             if 'sheet_error' in st.session_state:
                 del st.session_state.sheet_error
