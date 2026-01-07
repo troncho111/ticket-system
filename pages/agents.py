@@ -884,21 +884,19 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
-            # Create a unique key based on the DataFrame to avoid conflicts
-            # Use hash of row indices to create a stable but unique key
-            df_hash = hash(tuple(edit_df.index.tolist()[:10]) if len(edit_df) > 0 else ())
-            docket_editor_key = f"docket_editor_{df_hash}"
-            
             # st.data_editor automatically manages session_state with the key
-            # We just need to get the return value directly
+            # Use a fixed key - Streamlit will handle the state automatically
+            # Make sure edit_df is a fresh copy to avoid any state conflicts
+            edit_df_for_editor = edit_df.copy()
+            
             edited_df = st.data_editor(
-                edit_df,
+                edit_df_for_editor,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
                 num_rows="fixed",
                 hide_index=True,
-                key=docket_editor_key
+                key="docket_editor"
             )
             
             col_save, col_info = st.columns([1, 3])
