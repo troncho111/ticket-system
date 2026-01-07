@@ -4590,20 +4590,20 @@ if st.session_state.get('show_manual_order_form', False):
                 st.error("❌ הזן מחיר")
             else:
                 order_data = {
-                        'order date': submit_datetime,
-                        'orderd': add_status,
-                        'source': add_final_source,
-                        'Order number': add_order_number,
-                        'docket number': add_docket,
-                        'event name': add_event_name,
-                        'Date of the event': add_event_date,
-                        'Category / Section': add_category,
-                        'Qty': add_qty,
-                        'Price sold': f"{add_currency}{add_price:.2f}",
-                        'TOTAL': f"{add_currency}{add_total:.2f}",
-                    }
-                    
-                    with st.spinner("מוסיף..."):
+                    'order date': submit_datetime,
+                    'orderd': add_status,
+                    'source': add_final_source,
+                    'Order number': add_order_number,
+                    'docket number': add_docket,
+                    'event name': add_event_name,
+                    'Date of the event': add_event_date,
+                    'Category / Section': add_category,
+                    'Qty': add_qty,
+                    'Price sold': f"{add_currency}{add_price:.2f}",
+                    'TOTAL': f"{add_currency}{add_total:.2f}",
+                }
+                
+                with st.spinner("מוסיף..."):
                         success, message = add_new_order_to_sheet(order_data)
                         if success:
                             email_sent_msg = ""
