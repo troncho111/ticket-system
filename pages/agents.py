@@ -1024,16 +1024,19 @@ elif selected_tab == "📦 ניהול ספקים":
             cols_order = ['בחר'] + [col for col in edit_df_with_selection.columns if col != 'בחר']
             edit_df_with_selection = edit_df_with_selection[cols_order]
             
-            # CRITICAL: Do NOT initialize session_state for data_editor key - this causes StreamlitValueAssignmentNotAllowedError
-            # Also do NOT use key parameter - it causes state conflicts
-            # Use st.data_editor WITHOUT key to avoid errors
+            # Store previous state to detect changes
+            docket_editor_key = "docket_editor"
+            if docket_editor_key not in st.session_state:
+                st.session_state[docket_editor_key] = None
+            
             edited_df = st.data_editor(
                 edit_df_with_selection,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
                 num_rows="fixed",
-                hide_index=True
+                hide_index=True,
+                key=docket_editor_key
             )
             
             # Only process if button clicked, not on every edit
