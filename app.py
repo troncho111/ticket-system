@@ -6319,6 +6319,12 @@ with tab4:
             
             st.markdown("---")
             
+            # Use st.empty() containers to prevent rerender of unchanged widgets
+            # This significantly improves performance when typing in forms
+            container_cache_key = f"tab4_containers_{len(all_new_orders)}"
+            if container_cache_key not in st.session_state:
+                st.session_state[container_cache_key] = {}
+            
             for idx, (_, order) in enumerate(all_new_orders.iterrows()):
                 order_num = order.get('Order number', '-')
                 event_name = str(order.get('event name', '-'))[:50]
@@ -6333,6 +6339,11 @@ with tab4:
                 category = order.get('Category / Section', '-')
                 
                 is_ordered = current_status.lower() == 'orderd'
+                
+                # Use unique key for each container to prevent unnecessary rerenders
+                container_key = f"order_container_{order_num}_{idx}"
+                if container_key not in st.session_state[container_cache_key]:
+                    st.session_state[container_cache_key][container_key] = st.empty()
                 
                 with st.container(border=True):
                     if is_ordered:
