@@ -6325,17 +6325,17 @@ with tab4:
             def render_order_forms(orders_df):
                 for idx, (_, order) in enumerate(orders_df.iterrows()):
                     order_num = order.get('Order number', '-')
-                event_name = str(order.get('event name', '-'))[:50]
-                event_date = order.get('Date of the event', '-')
-                order_date = order.get('order date', '-')
-                qty = order.get('Qty', '-')
-                total = order.get('TOTAL', '-')
-                source = order.get('source', '-')
-                current_supp_order = str(order.get('SUPP order number', '')).strip()
-                current_status = str(order.get(tab4_status_col, '')).strip()
-                row_idx = order.get('row_index', None)
-                category = order.get('Category / Section', '-')
-                
+                    event_name = str(order.get('event name', '-'))[:50]
+                    event_date = order.get('Date of the event', '-')
+                    order_date = order.get('order date', '-')
+                    qty = order.get('Qty', '-')
+                    total = order.get('TOTAL', '-')
+                    source = order.get('source', '-')
+                    current_supp_order = str(order.get('SUPP order number', '')).strip()
+                    current_status = str(order.get(tab4_status_col, '')).strip()
+                    row_idx = order.get('row_index', None)
+                    category = order.get('Category / Section', '-')
+                    
                     is_ordered = current_status.lower() == 'orderd'
                     
                     with st.container(border=True):
