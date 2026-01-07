@@ -5945,8 +5945,13 @@ with tab3:
                         
                         if available_cols:
                             display_df = orders_df[available_cols].copy()
-                            display_df.insert(0, 'Select', False)
-                            display_df['row_index'] = orders_df['row_index']
+                            # Ensure Select column exists even if DataFrame is empty
+                            if 'Select' not in display_df.columns:
+                                display_df.insert(0, 'Select', False)
+                            if 'row_index' in orders_df.columns:
+                                display_df['row_index'] = orders_df['row_index']
+                            elif 'row_index' not in display_df.columns:
+                                display_df['row_index'] = range(2, len(display_df) + 2)
                             
                             if 'orderd' in display_df.columns:
                                 def format_status_op(status_val):
