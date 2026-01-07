@@ -888,9 +888,13 @@ elif selected_tab == "📦 ניהול ספקים":
             # Make sure edit_df is a fresh copy
             edit_df_for_editor = edit_df.copy()
             
-            # Clear any corrupted session_state entries that might cause issues
-            # Remove any old keys that might conflict
-            keys_to_remove = [k for k in st.session_state.keys() if 'docket_editor' in str(k) or 'edit_df_with' in str(k)]
+            # CRITICAL: Clear ALL session_state entries related to data_editor
+            # This prevents StreamlitValueAssignmentNotAllowedError
+            keys_to_remove = []
+            for k in list(st.session_state.keys()):
+                if any(term in str(k).lower() for term in ['docket_editor', 'edit_df', 'data_editor', 'with_selection']):
+                    keys_to_remove.append(k)
+            
             for key in keys_to_remove:
                 try:
                     del st.session_state[key]
