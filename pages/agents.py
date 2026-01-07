@@ -947,14 +947,14 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
+            # Use st.data_editor WITHOUT key to avoid StreamlitValueAssignmentNotAllowedError
             edited_df = st.data_editor(
                 edit_df,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
                 num_rows="fixed",
-                hide_index=True,
-                key="docket_editor"
+                hide_index=True
             )
             
             col_save, col_info = st.columns([1, 3])
