@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
+import gspread.exceptions
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import plotly.express as px
@@ -1354,16 +1355,25 @@ def get_gspread_client():
     ]
     creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment")
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
     
-    if isinstance(creds_json, str):
-        creds_dict = json.loads(creds_json)
-    else:
-        creds_dict = dict(creds_json)
+    try:
+        if isinstance(creds_json, str):
+            creds_dict = json.loads(creds_json)
+        else:
+            creds_dict = dict(creds_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
     
-    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-    client = gspread.authorize(credentials)
-    return client
+    try:
+        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        error_msg = str(e)
+        if "invalid_grant" in error_msg.lower() or "invalid" in error_msg.lower():
+            raise ValueError(f"Invalid Google credentials. Please check your GOOGLE_CREDENTIALS JSON: {error_msg}")
+        raise
 
 def generate_order_number(df):
     """Generate new order number based on existing max"""
@@ -1718,6 +1728,9 @@ def load_data_from_sheet():
         data = worksheet.get_all_values()
         
         if len(data) < 2:
+            # Clear any previous error state on successful connection
+            if 'sheet_error' in st.session_state:
+                del st.session_state.sheet_error
             return pd.DataFrame()
         
         headers = [str(h).strip() for h in data[0]]
@@ -1792,10 +1805,50 @@ def load_data_from_sheet():
                 lambda x: hebrew_to_english_status.get(str(x).strip(), x) if pd.notna(x) else x
             )
         
+        # Clear any previous error state on successful load
+        if 'sheet_error' in st.session_state:
+            del st.session_state.sheet_error
+        
         return df
         
+    except ValueError as e:
+        error_msg = ""
+        if "GOOGLE_CREDENTIALS" in str(e):
+            error_msg = "❌ **שגיאת אימות:** משתנה הסביבה GOOGLE_CREDENTIALS לא נמצא. אנא הגדר אותו ב-Streamlit Cloud Secrets."
+        else:
+            error_msg = f"❌ **שגיאת אימות:** {str(e)}"
+        st.session_state.sheet_error = error_msg
+        st.error(error_msg)
+        # Clear cache to retry on next call
+        load_data_from_sheet.clear()
+        return pd.DataFrame()
+    except gspread.exceptions.SpreadsheetNotFound:
+        error_msg = f"❌ **אין גישה לגוגל שיטס:** לא נמצא גיליון בשם '{SHEET_NAME}'. אנא ודא שהגיליון קיים ושם חשבון השירות יש לו גישה אליו."
+        st.session_state.sheet_error = error_msg
+        st.error(error_msg)
+        load_data_from_sheet.clear()
+        return pd.DataFrame()
+    except gspread.exceptions.APIError as e:
+        error_msg = str(e)
+        if "PERMISSION_DENIED" in error_msg or "403" in error_msg:
+            error_msg = f"❌ **אין גישה לגוגל שיטס:** אין הרשאות לגיליון '{SHEET_NAME}'. אנא ודא שחשבון השירות של Google יש לו הרשאות לעריכה בגיליון."
+        elif "401" in error_msg or "UNAUTHENTICATED" in error_msg:
+            error_msg = f"❌ **אין גישה לגוגל שיטס:** האימות נכשל. אנא בדוק את GOOGLE_CREDENTIALS ב-Streamlit Cloud Secrets."
+        else:
+            error_msg = f"❌ **אין גישה לגוגל שיטס:** {error_msg}"
+        st.session_state.sheet_error = error_msg
+        st.error(error_msg)
+        load_data_from_sheet.clear()
+        return pd.DataFrame()
     except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
+        error_type = type(e).__name__
+        error_msg = f"❌ **שגיאה בטעינת נתונים ({error_type}):** {str(e)}"
+        st.session_state.sheet_error = error_msg
+        st.error(error_msg)
+        import traceback
+        with st.expander("🔍 פרטי שגיאה מפורטים"):
+            st.code(traceback.format_exc())
+        load_data_from_sheet.clear()
         return pd.DataFrame()
 
 def col_number_to_letter(col_num):
@@ -2650,7 +2703,10 @@ with st.sidebar:
     st.markdown("---")
     
     if st.button(t("refresh_data"), use_container_width=True):
+        load_data_from_sheet.clear()
         st.cache_data.clear()
+        if 'sheet_error' in st.session_state:
+            del st.session_state.sheet_error
         st.rerun()
     
     if st.button(t("auto_update_btn"), use_container_width=True):
@@ -3265,7 +3321,36 @@ def apply_filters(df):
 st.title(t("title"))
 
 if df.empty:
+    # Show stored error if available
+    if 'sheet_error' in st.session_state:
+        st.error(st.session_state.sheet_error)
+    
     st.warning(t("no_data"))
+    st.info("💡 **טיפים לפתרון בעיות:**")
+    st.markdown("""
+    1. **בדוק את משתנה הסביבה GOOGLE_CREDENTIALS** - ודא שהוא מוגדר ב-Streamlit Cloud Secrets
+    2. **ודא ששם הגיליון נכון** - השם צריך להיות בדיוק: `מערכת הזמנות - קוד יהודה  ` (עם רווחים בסוף)
+    3. **בדוק הרשאות** - ודא שחשבון השירות של Google יש לו גישה לעריכה בגיליון
+    4. **נסה לרענן** - לחץ על כפתור "🔄 רענן נתונים" בסרגל הצד
+    5. **נקה את ה-cache** - אם הבעיה נמשכת, נסה לנקות את ה-cache של הנתונים
+    """)
+    
+    # Add button to clear cache and retry
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 נסה שוב", key="retry_load"):
+            load_data_from_sheet.clear()
+            if 'sheet_error' in st.session_state:
+                del st.session_state.sheet_error
+            st.rerun()
+    with col2:
+        if st.button("🗑️ נקה cache ונסה שוב", key="clear_cache_retry"):
+            load_data_from_sheet.clear()
+            if 'sheet_error' in st.session_state:
+                del st.session_state.sheet_error
+            st.cache_data.clear()
+            st.rerun()
+    
     st.stop()
 
 now = datetime.now()
