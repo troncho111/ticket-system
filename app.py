@@ -1365,6 +1365,99 @@ st.set_page_config(
 
 import hashlib
 
+# Define constants and functions needed for mark_paid functionality BEFORE using them
+SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
+WORKSHEET_INDEX = 0
+
+def get_gspread_client():
+    """Create and return a gspread client using credentials from environment."""
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # Try to get from Streamlit secrets first (if available)
+    creds_json = None
+    try:
+        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
+            creds_json = st.secrets['GOOGLE_CREDENTIALS']
+    except:
+        pass
+    
+    # Fallback to environment variable
+    if not creds_json:
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
+    if not creds_json:
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
+    
+    # Handle different input formats
+    try:
+        if isinstance(creds_json, dict):
+            creds_dict = creds_json
+        elif isinstance(creds_json, str):
+            creds_dict = json.loads(creds_json)
+        else:
+            creds_dict = dict(creds_json)
+        
+        # Ensure private_key is properly formatted (handle escaped newlines)
+        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
+            private_key = creds_dict['private_key']
+            import re
+            private_key = re.sub(r'\\{2,}n', '\n', private_key)
+            if '\\n' in private_key:
+                private_key = private_key.replace('\\n', '\n')
+            if '-----BEGIN PRIVATE KEY----- ' in private_key:
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
+            
+            if '-----BEGIN PRIVATE KEY-----' not in private_key or '-----END PRIVATE KEY-----' not in private_key:
+                raise ValueError("private_key לא תקין - חסרים BEGIN/END markers")
+            
+            if '\n' not in private_key:
+                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
+                end_idx = private_key.find('-----END PRIVATE KEY-----')
+                if begin_idx >= 0 and end_idx > begin_idx:
+                    begin_marker = '-----BEGIN PRIVATE KEY-----'
+                    end_marker = '-----END PRIVATE KEY-----'
+                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
+                    key_content = key_content.replace(' ', '')
+                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
+                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
+            
+            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
+            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
+                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
+            
+            creds_dict['private_key'] = private_key
+        
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
+    
+    required_fields = ['type', 'project_id', 'private_key', 'client_email']
+    missing_fields = [f for f in required_fields if f not in creds_dict]
+    if missing_fields:
+        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
+    
+    try:
+        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(credentials)
+        return client
+    except Exception as e:
+        raise ValueError(f"Error creating gspread client: {str(e)}")
+
+def col_number_to_letter(col_num):
+    """Convert column number (1-based) to Excel-style letter (A, B, ..., Z, AA, AB, ...)"""
+    result = ""
+    while col_num > 0:
+        col_num -= 1
+        result = chr(65 + (col_num % 26)) + result
+        col_num //= 26
+    return result
+
 def verify_mark_paid_token(order_num, row_index, token):
     """Verify the mark-as-paid token - requires SESSION_SECRET to be set"""
     secret = os.environ.get('SESSION_SECRET')
@@ -1580,9 +1673,6 @@ else:
     </style>
     """, unsafe_allow_html=True)
 
-SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
-WORKSHEET_INDEX = 0
-
 TRANSLATIONS = {
     "en": {
         "title": "🎫 Ticket Agency Management System",
@@ -1763,273 +1853,8 @@ def normalize_order_number(order_num):
     
     return cleaned
 
-def get_gspread_client():
-    """Create and return a gspread client using credentials from environment."""
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    
-    # Try to get from Streamlit secrets first (if available)
-    creds_json = None
-    try:
-        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
-            creds_json = st.secrets['GOOGLE_CREDENTIALS']
-    except:
-        pass
-    
-    # Fallback to environment variable
-    if not creds_json:
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-    
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
-    
-    # Handle different input formats
-    try:
-        if isinstance(creds_json, dict):
-            # Already a dictionary (from Streamlit secrets)
-            creds_dict = creds_json
-        elif isinstance(creds_json, str):
-            # Parse JSON string
-            creds_dict = json.loads(creds_json)
-        else:
-            # Try to convert to dict
-            creds_dict = dict(creds_json)
-        
-        # Ensure private_key is properly formatted (handle escaped newlines)
-        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
-            private_key = creds_dict['private_key']
-            original_key = private_key  # Keep original for debugging
-            
-            # Step 1: Handle escaped newlines - convert \n (two characters: backslash + n) to actual newline
-            # This is critical - JSON strings have "\\n" which needs to become actual "\n"
-            # Handle all variations: \n, \\n, \\\n, etc.
-            import re
-            # First, handle multiple backslashes (2+) followed by 'n' - do this BEFORE simple replace
-            # This handles cases like: \\n, \\\n, \\\\n, etc. -> all become actual newline
-            private_key = re.sub(r'\\{2,}n', '\n', private_key)
-            
-            # Then handle single escaped newline (\n -> actual newline)
-            # This handles the standard case where JSON has "\n" as a string
-            if '\\n' in private_key:
-                private_key = private_key.replace('\\n', '\n')
-            
-            # Step 2: Handle case where newlines might have been converted to spaces
-            # Sometimes when loading from Streamlit Secrets, newlines become spaces
-            # Check if BEGIN is followed by space instead of newline
-            if '-----BEGIN PRIVATE KEY----- ' in private_key:
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
-            
-            # Step 3: Ensure proper format - the key should have newlines
-            # Verify BEGIN and END markers exist
-            if '-----BEGIN PRIVATE KEY-----' not in private_key:
-                raise ValueError(
-                    "private_key לא מכיל '-----BEGIN PRIVATE KEY-----'.\n"
-                    f"המפתח מתחיל ב: {private_key[:100] if len(private_key) > 100 else private_key}..."
-                )
-            
-            if '-----END PRIVATE KEY-----' not in private_key:
-                raise ValueError(
-                    "private_key לא מכיל '-----END PRIVATE KEY-----'.\n"
-                    f"המפתח מסתיים ב: ...{private_key[-100:] if len(private_key) > 100 else private_key}"
-                )
-            
-            # Step 4: Ensure there are actual newlines in the key
-            # The key MUST have newlines - if not, try to fix it
-            if '\n' not in private_key:
-                # Try to reconstruct with newlines
-                # Split by BEGIN and END markers
-                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
-                end_idx = private_key.find('-----END PRIVATE KEY-----')
-                
-                if begin_idx >= 0 and end_idx > begin_idx:
-                    begin_marker = '-----BEGIN PRIVATE KEY-----'
-                    end_marker = '-----END PRIVATE KEY-----'
-                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
-                    # Remove any spaces and reconstruct with newlines every 64 chars (standard PEM format)
-                    key_content = key_content.replace(' ', '')
-                    # Reconstruct with newlines every 64 characters
-                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
-                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
-                else:
-                    raise ValueError(
-                        "private_key לא מכיל newlines אמיתיים ולא ניתן לתקן אוטומטית.\n"
-                        "ודא שה-private_key ב-JSON כולל \\n (escaped newlines)."
-                    )
-            
-            # Step 5: Additional validation
-            if len(private_key) < 100:
-                raise ValueError(
-                    "private_key נראה קצר מדי - ודא שהעתקת את כל המפתח מה-JSON file."
-                )
-            
-            # Step 6: Final format check - ensure newlines are present after BEGIN and before END
-            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
-                # Try to fix if missing newline after BEGIN
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
-            
-            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
-                # Try to fix if missing newline before END
-                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
-            
-            creds_dict['private_key'] = private_key
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
-    
-    # Validate required fields
-    required_fields = ['type', 'project_id', 'private_key', 'client_email']
-    missing_fields = [f for f in required_fields if f not in creds_dict]
-    if missing_fields:
-        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
-    
-    try:
-        # Create a copy to avoid modifying the original
-        creds_dict_copy = creds_dict.copy()
-        
-        # Final validation and fix of private_key before passing to oauth2client
-        if 'private_key' in creds_dict_copy:
-            pk = creds_dict_copy['private_key']
-            
-            # Ensure it's a string
-            if not isinstance(pk, str):
-                raise ValueError(f"private_key צריך להיות string, אבל קיבלנו: {type(pk)}")
-            
-            # CRITICAL FIX: The private_key might be corrupted or incomplete
-            # Let's ensure it's properly formatted
-            
-            # 1. Remove any leading/trailing whitespace
-            pk = pk.strip()
-            
-            # 2. Ensure BEGIN marker is at the start
-            if not pk.startswith('-----BEGIN'):
-                begin_idx = pk.find('-----BEGIN')
-                if begin_idx > 0:
-                    pk = pk[begin_idx:]
-            
-            # 3. Ensure END marker is at the end
-            if not pk.rstrip().endswith('-----END PRIVATE KEY-----'):
-                end_idx = pk.rfind('-----END PRIVATE KEY-----')
-                if end_idx > 0:
-                    pk = pk[:end_idx + len('-----END PRIVATE KEY-----')]
-            
-            # 4. Verify the key is complete - check length (should be ~1600-1700 chars for RSA key)
-            if len(pk) < 1000:
-                raise ValueError(
-                    f"private_key נראה קצר מדי ({len(pk)} תווים). המפתח צריך להיות ~1600 תווים.\n"
-                    "המפתח כנראה נחתך או לא הועתק במלואו."
-                )
-            
-            # 5. Verify BEGIN and END markers
-            if '-----BEGIN PRIVATE KEY-----' not in pk:
-                raise ValueError("private_key לא מכיל '-----BEGIN PRIVATE KEY-----'")
-            
-            if '-----END PRIVATE KEY-----' not in pk:
-                raise ValueError("private_key לא מכיל '-----END PRIVATE KEY-----'")
-            
-            # 6. Extract and validate the key content
-            begin_marker = '-----BEGIN PRIVATE KEY-----'
-            end_marker = '-----END PRIVATE KEY-----'
-            begin_idx = pk.find(begin_marker)
-            end_idx = pk.find(end_marker)
-            
-            if begin_idx < 0 or end_idx < 0 or end_idx <= begin_idx:
-                raise ValueError("private_key לא בפורמט תקין - בעיה במיקום BEGIN/END markers")
-            
-            # Extract the actual key content (between markers)
-            key_content = pk[begin_idx + len(begin_marker):end_idx].strip()
-            
-            # Remove all whitespace and newlines to get pure base64
-            key_content_clean = key_content.replace('\n', '').replace(' ', '').replace('\r', '')
-            
-            # Validate key content length (RSA private key should be ~1600-1700 base64 chars)
-            if len(key_content_clean) < 1000:
-                raise ValueError(
-                    f"תוכן המפתח קצר מדי ({len(key_content_clean)} תווים). המפתח כנראה לא שלם.\n"
-                    "ודא שהעתקת את כל המפתח מה-JSON file."
-                )
-            
-            # Reconstruct the key with proper PEM format
-            # PEM format: lines of 64 characters
-            key_lines = [key_content_clean[i:i+64] for i in range(0, len(key_content_clean), 64)]
-            pk = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
-            
-            # Update the dict with the fixed key
-            creds_dict_copy['private_key'] = pk
-        
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict_copy, scope)
-        client = gspread.authorize(credentials)
-        return client
-    except Exception as e:
-        error_msg = str(e)
-        error_type = type(e).__name__
-        
-        # Provide specific error messages for common issues
-        if "seekable bit stream" in error_msg.lower() or "unsupportedsubstrateerror" in error_msg.lower() or "substrateunderrun" in error_msg.lower():
-            # Check if we can see the private_key format
-            private_key_preview = ""
-            private_key_length = 0
-            if 'private_key' in creds_dict:
-                pk = str(creds_dict['private_key'])
-                private_key_length = len(pk)
-                if len(pk) > 0:
-                    preview = pk[:100] + "..." if len(pk) > 100 else pk
-                    private_key_preview = f"\n**תצוגה מקדימה של private_key:** {preview}\n**אורך המפתח:** {private_key_length} תווים"
-            
-            # Determine the specific issue
-            if "substrateunderrun" in error_msg.lower() or "short substrate" in error_msg.lower():
-                issue_desc = "ה-private_key לא שלם או נחתך - המפתח קצר מדי או פגום."
-                solution_extra = "\n**חשוב במיוחד:** ודא שהעתקת את כל המפתח במלואו - המפתח צריך להיות ~1600 תווים."
-            else:
-                issue_desc = "ה-private_key לא בפורמט הנכון."
-                solution_extra = ""
-            
-            detailed_msg = (
-                f"❌ **שגיאה בפורמט ה-private_key ב-GOOGLE_CREDENTIALS**\n\n"
-                f"**הבעיה:** {issue_desc}\n\n"
-                f"**פתרון:**\n"
-                f"1. פתח את הקובץ JSON המקורי מה-Google Cloud Console\n"
-                f"2. **העתק את כל התוכן** של הקובץ (כולל ה-private_key המלא)\n"
-                f"3. ב-Streamlit Cloud Secrets:\n"
-                f"   - לך ל-Settings > Secrets\n"
-                f"   - מחק את GOOGLE_CREDENTIALS הקיים\n"
-                f"   - הוסף מחדש עם כל ה-JSON המלא\n"
-                f"4. **ודא שה-private_key כולל `\\n` (escaped newlines) בתוך המחרוזת**\n"
-                f"5. שמור והפעל מחדש את האפליקציה\n\n"
-                f"{solution_extra}\n\n"
-                f"{private_key_preview}\n\n"
-                f"**סוג שגיאה:** {error_type}\n"
-                f"**פרטים:** {error_msg}"
-            )
-            raise ValueError(detailed_msg)
-        elif "invalid_grant" in error_msg.lower():
-            detailed_msg = (
-                f"אימות נכשל - האימות ל-Google API נכשל.\n"
-                f"בדוק שהחשבון השירות פעיל ושהמפתח לא פג תוקף.\n"
-                f"סוג שגיאה: {error_type}\n"
-                f"פרטים: {error_msg}"
-            )
-            raise ValueError(detailed_msg)
-        elif "invalid" in error_msg.lower():
-            detailed_msg = (
-                f"Credentials לא תקינים.\n"
-                f"בדוק את GOOGLE_CREDENTIALS ב-Streamlit Cloud Secrets.\n"
-                f"סוג שגיאה: {error_type}\n"
-                f"פרטים: {error_msg}"
-            )
-            raise ValueError(detailed_msg)
-        else:
-            # Generic error with full details
-            detailed_msg = (
-                f"שגיאה בחיבור ל-Google API.\n"
-                f"סוג שגיאה: {error_type}\n"
-                f"פרטים: {error_msg}"
-            )
-            raise ValueError(detailed_msg)
+# get_gspread_client is already defined above (before mark_paid code)
+# Removed duplicate definition here
 
 def generate_order_number(df):
     """Generate new order number based on existing max"""
