@@ -3385,10 +3385,17 @@ if df.empty:
         
         st.markdown("---")
         
-        # 3. Test connection and permissions
+        # 3. Test connection and permissions (automatic check)
         st.subheader("3️⃣ בדיקת חיבור והרשאות")
+        
+        # Check if we should run connection test (first time or if refresh requested)
+        should_test_connection = (
+            'connection_test_done' not in st.session_state or 
+            st.session_state.get('refresh_connection_test', False)
+        )
+        
         if diagnostic_results.get('credentials', False):
-            if st.button("🔌 בדוק חיבור", key="test_connection"):
+            if should_test_connection:
                 with st.spinner("בודק חיבור ל-Google Sheets..."):
                     try:
                         client = get_gspread_client()
@@ -3418,16 +3425,24 @@ if df.empty:
                                     
                                     diagnostic_results['connection'] = True
                                     diagnostic_results['permissions'] = True
+                                    st.session_state.connection_test_done = True
+                                    st.session_state.connection_test_results = diagnostic_results.copy()
                                 except Exception as e:
                                     st.error(f"❌ **שגיאה בקריאת נתונים:** {str(e)}")
                                     diagnostic_results['connection'] = False
+                                    st.session_state.connection_test_done = True
+                                    st.session_state.connection_test_results = diagnostic_results.copy()
                             except Exception as e:
                                 st.error(f"❌ **שגיאה בטעינת גיליון עבודה:** {str(e)}")
                                 diagnostic_results['connection'] = False
+                                st.session_state.connection_test_done = True
+                                st.session_state.connection_test_results = diagnostic_results.copy()
                         except gspread.exceptions.SpreadsheetNotFound:
                             st.error(f"❌ **גיליון לא נמצא:** `{SHEET_NAME}`")
                             st.info("💡 **פתרון:** ודא שהגיליון קיים ושם חשבון השירות יש לו גישה אליו")
                             diagnostic_results['connection'] = False
+                            st.session_state.connection_test_done = True
+                            st.session_state.connection_test_results = diagnostic_results.copy()
                         except gspread.exceptions.APIError as e:
                             error_msg = str(e)
                             if "PERMISSION_DENIED" in error_msg or "403" in error_msg:
@@ -3439,12 +3454,33 @@ if df.empty:
                                 else:
                                     st.code("1. פתח את הגיליון ב-Google Sheets\n2. לחץ על 'שתף' (Share)\n3. הוסף את כתובת האימייל של חשבון השירות\n4. תן הרשאות 'עורך' (Editor)")
                                 diagnostic_results['permissions'] = False
+                                st.session_state.connection_test_done = True
+                                st.session_state.connection_test_results = diagnostic_results.copy()
                             else:
                                 st.error(f"❌ **שגיאת API:** {error_msg}")
                                 diagnostic_results['connection'] = False
+                                st.session_state.connection_test_done = True
+                                st.session_state.connection_test_results = diagnostic_results.copy()
                     except Exception as e:
                         st.error(f"❌ **שגיאה בחיבור:** {str(e)}")
                         diagnostic_results['connection'] = False
+                        st.session_state.connection_test_done = True
+                        st.session_state.connection_test_results = diagnostic_results.copy()
+                
+                # Clear refresh flag
+                if 'refresh_connection_test' in st.session_state:
+                    del st.session_state.refresh_connection_test
+            else:
+                # Show cached results
+                cached_results = st.session_state.get('connection_test_results', {})
+                if cached_results.get('connection'):
+                    st.success("✅ **חיבור אומת בהצלחה** (תוצאות מבדיקה קודמת)")
+                elif cached_results.get('connection') == False:
+                    st.warning("⚠️ **נמצאו בעיות בחיבור** (תוצאות מבדיקה קודמת)")
+                
+                if st.button("🔄 בדוק שוב", key="retry_connection_test"):
+                    st.session_state.refresh_connection_test = True
+                    st.rerun()
         else:
             st.warning("⚠️ **לא ניתן לבדוק חיבור - GOOGLE_CREDENTIALS לא תקין**")
         
