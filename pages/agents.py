@@ -1080,13 +1080,21 @@ elif selected_tab == "📦 ניהול ספקים":
             
             st.markdown("---")
             
-            csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
+            # Use the final filtered edit_df for CSV export (not filtered_df)
+            # Remove any temporary columns that might exist
+            csv_df = edit_df.copy()
+            csv_df = csv_df.drop(columns=['_date_parsed'], errors='ignore')
+            csv_df = csv_df.drop(columns=['בחר'], errors='ignore')
+            
+            # If edit_df was filtered further, use it; otherwise use filtered_df
+            csv = csv_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 הורד כ-CSV",
                 data=csv,
-                file_name=f"orders_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"orders_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
-                key="download_csv"
+                key="download_csv",
+                help=f"מוריד {len(csv_df)} שורות מסוננות (מתוך {len(df)} סה\"כ)"
             )
         else:
             st.error("לא נמצאו עמודות להצגה")
