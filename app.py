@@ -1021,6 +1021,152 @@ def send_weekly_sales_report_email(orders_df, to_email, week_start_date=None, we
         return False, f"שגיאה בשליחת מייל: {str(e)}"
 
 
+def send_unpaid_orders_report_email(orders_df, to_email):
+    """Send email report with all unpaid orders (sent - not paid) - RED THEME with Mark as Paid buttons"""
+    api_key, from_email = get_resend_credentials()
+    
+    if not api_key or not from_email:
+        error_msg = (
+            "❌ **לא נמצאו פרטי התחברות ל-Resend**\n\n"
+            "💡 **פתרון:** הוסף את הפרטים ב-Streamlit Cloud Secrets:\n"
+            "RESEND_API_KEY = \"re_xxxxxxxxxxxxxxxxxxxxxxxxxx\"\n"
+            "RESEND_FROM_EMAIL = \"info@tiktik.co.il\""
+        )
+        return False, error_msg
+    
+    if orders_df.empty:
+        return False, "אין הזמנות שלא שולמו לשלוח"
+    
+    resend.api_key = api_key
+    
+    israel_tz = pytz.timezone('Israel')
+    now = datetime.now(israel_tz)
+    
+    # Get app base URL for mark-as-paid links
+    app_url = os.environ.get('APP_BASE_URL', 'https://workspace-yehudatiktik.replit.app')
+    
+    # Calculate totals
+    total_amount = 0
+    if 'TOTAL' in orders_df.columns:
+        for total_val in orders_df['TOTAL']:
+            if total_val and total_val != '-':
+                try:
+                    amount = float(str(total_val).replace('€','').replace('£','').replace('$','').replace(',','').strip())
+                    total_amount += amount
+                except:
+                    pass
+    
+    email_body = f"""<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:Arial,sans-serif;">
+<div dir="rtl" style="max-width:600px;margin:0 auto;background:#fff;">
+
+<div style="background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;padding:20px;text-align:center;">
+<div style="font-size:22px;font-weight:bold;">🔴 תזכורת - הזמנות לא שולמו</div>
+<div style="font-size:13px;opacity:0.9;margin-top:5px;">קוד יהודה | {now.strftime('%d/%m/%Y %H:%M')}</div>
+</div>
+
+<div style="background:#dc2626;color:#fff;padding:15px;text-align:center;font-size:18px;font-weight:bold;">
+{len(orders_df)} הזמנות ממתינות לתשלום
+</div>
+
+<div style="padding:20px;">
+"""
+    
+    # Generate mark-as-paid tokens and build order cards
+    for idx, (_, order) in enumerate(orders_df.iterrows()):
+        order_num = order.get('Order number', '-')
+        event_name = order.get('event name', '-')
+        docket = order.get('docket number', order.get('docket', order.get('Docket', '-')))
+        source = order.get('source', '-')
+        supp_order = order.get('SUPP order number', '-')
+        event_date = order.get('Date of the event', '-')
+        qty = order.get('Qty', order.get('QTY', '-'))
+        price_sold = order.get('Price sold', '-')
+        total_sold = order.get('TOTAL', '-')
+        row_index = order.get('row_index', '')
+        
+        if total_sold and total_sold != '-':
+            try:
+                amount = float(str(total_sold).replace('€','').replace('£','').replace('$','').replace(',','').strip())
+                total_display = f"€{amount:,.2f}"
+            except:
+                total_display = str(total_sold)
+        else:
+            total_display = '-'
+        
+        # Generate mark-as-paid token
+        mark_paid_button = ""
+        if row_index:
+            try:
+                secret = os.environ.get('SESSION_SECRET')
+                if secret and len(secret) >= 10:
+                    data = f"{order_num}:{row_index}:{secret}"
+                    token = hashlib.sha256(data.encode()).hexdigest()[:16]
+                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_index}&token={token}"
+                    mark_paid_button = f"""
+            <div style="margin-top: 15px; text-align: center;">
+                <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
+                    סמן כשולם (Done!)
+                </a>
+            </div>
+            """
+            except:
+                pass
+        
+        email_body += f"""
+        <div style="background: #fee2e2; padding: 15px; margin: 10px 0; border-radius: 8px; border-right: 4px solid #dc2626;">
+            <h3 style="color: #dc2626; margin-top: 0;">הזמנה #{idx+1} - לא שולם</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr><td style="padding: 5px;"><strong>מספר הזמנה:</strong></td><td style="padding: 5px;">{order_num}</td></tr>
+                <tr><td style="padding: 5px;"><strong>שם אירוע:</strong></td><td style="padding: 5px;">{event_name}</td></tr>
+                <tr><td style="padding: 5px;"><strong>מספר דוקט:</strong></td><td style="padding: 5px;">{docket}</td></tr>
+                <tr><td style="padding: 5px;"><strong>מקור:</strong></td><td style="padding: 5px;">{source}</td></tr>
+                <tr><td style="padding: 5px;"><strong>מספר הזמנה ספק:</strong></td><td style="padding: 5px;">{supp_order}</td></tr>
+                <tr><td style="padding: 5px;"><strong>תאריך אירוע:</strong></td><td style="padding: 5px;">{event_date}</td></tr>
+                <tr><td style="padding: 5px;"><strong>כמות:</strong></td><td style="padding: 5px;">{qty}</td></tr>
+                <tr><td style="padding: 5px;"><strong>מחיר מקורי לכרטיס:</strong></td><td style="padding: 5px;">{price_sold}</td></tr>
+                <tr style="background: #dc2626; color: white;"><td style="padding: 5px;"><strong>סכום לגבייה:</strong></td><td style="padding: 5px;"><strong>{total_display}</strong></td></tr>
+            </table>
+            {mark_paid_button}
+        </div>
+        """
+    
+    if total_amount > 0:
+        email_body += f"""
+<div style="background: #dc2626; color: white; padding: 15px; border-radius: 8px; text-align: center; margin-top: 20px;">
+<h2 style="margin: 0;">סה"כ לגבייה: €{total_amount:,.2f}</h2>
+</div>
+"""
+    
+    email_body += """
+</div>
+
+<div style="background:#1a1a2e;color:#aaa;padding:15px;text-align:center;font-size:11px;">
+<div>מערכת ניהול הזמנות - קוד יהודה</div>
+<div style="margin-top:5px;">דוח יזום - הזמנות שלא שולמו</div>
+</div>
+
+</div>
+</body>
+</html>"""
+    
+    try:
+        result = resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": f"🔴 תזכורת - {len(orders_df)} הזמנות לא שולמו! (€{total_amount:,.2f})",
+            "html": email_body
+        })
+        return True, f"המייל נשלח בהצלחה! ID: {result.get('id', 'N/A')}"
+    except Exception as e:
+        return False, f"שגיאה בשליחת מייל: {str(e)}"
+
+
 SOURCE_DISPLAY_NAMES = {
     'goldenseat': 'Goldenseat/TikTik',
     'tiktik': 'Goldenseat/TikTik',
@@ -3184,7 +3330,7 @@ with st.sidebar:
     
     report_type = st.selectbox(
         "בחר סוג דוח:",
-        options=["📋 כרטיסים לרכישה", "💰 מכירות יומי", "📊 מכירות שבועי"],
+        options=["📋 כרטיסים לרכישה", "💰 מכירות יומי", "📊 מכירות שבועי", "🔴 הזמנות שלא שולמו"],
         key="email_report_type_selector"
     )
     
@@ -3326,6 +3472,46 @@ with st.sidebar:
                     st.error("❌ כתובת מייל לא תקינה")
         else:
             st.caption(f"אין מכירות בתקופה זו")
+    
+    elif report_type == "🔴 הזמנות שלא שולמו":
+        unpaid_orders_for_email = pd.DataFrame()
+        if not temp_df_for_email.empty and 'orderd' in temp_df_for_email.columns:
+            # Find orders with status 'sent_not_paid', 'sent - not paid', or 'נשלח ולא שולם'
+            status_mask = (
+                temp_df_for_email['orderd'].fillna('').str.strip().str.lower().str.contains('sent_not_paid', na=False) |
+                temp_df_for_email['orderd'].fillna('').str.strip().str.lower().str.contains('sent - not paid', na=False) |
+                temp_df_for_email['orderd'].fillna('').str.strip().str.contains('נשלח ולא שולם', na=False)
+            )
+            unpaid_orders_for_email = temp_df_for_email[status_mask].copy()
+        
+        unpaid_count = len(unpaid_orders_for_email)
+        unpaid_tickets = int(pd.to_numeric(unpaid_orders_for_email.get('Qty', 0), errors='coerce').sum()) if not unpaid_orders_for_email.empty else 0
+        
+        # Calculate total amount
+        total_amount = 0
+        if not unpaid_orders_for_email.empty and 'TOTAL' in unpaid_orders_for_email.columns:
+            for total_val in unpaid_orders_for_email['TOTAL']:
+                if total_val and total_val != '-':
+                    try:
+                        amount = float(str(total_val).replace('€','').replace('£','').replace('$','').replace(',','').strip())
+                        total_amount += amount
+                    except:
+                        pass
+        
+        if unpaid_count > 0:
+            st.info(f"🔴 {unpaid_count} הזמנות ({unpaid_tickets} כרטיסים) | סה״כ לגבייה: €{total_amount:,.2f}")
+            if st.button("📤 שלח דוח הזמנות שלא שולמו", use_container_width=True, type="primary", key="send_unpaid_orders_btn"):
+                if email_recipient and '@' in email_recipient:
+                    with st.spinner("שולח מייל..."):
+                        success, message = send_unpaid_orders_report_email(unpaid_orders_for_email, email_recipient)
+                        if success:
+                            st.success(f"✅ {message}")
+                        else:
+                            st.error(f"❌ {message}")
+                else:
+                    st.error("❌ כתובת מייל לא תקינה")
+        else:
+            st.caption("✅ אין הזמנות שלא שולמו")
     
     st.markdown("---")
     st.markdown("**🔍 חיפוש מהיר**")
