@@ -3201,16 +3201,9 @@ with st.sidebar:
     st.markdown("---")
     
     if st.button(t("refresh_data"), use_container_width=True):
-        load_data_from_sheet.clear()
-        st.cache_data.clear()
+        clear_all_caches()
         if 'sheet_error' in st.session_state:
             del st.session_state.sheet_error
-        st.session_state.needs_data_refresh = True
-        # Clear cached data
-        if 'main_df' in st.session_state:
-            del st.session_state.main_df
-        if 'df_has_supplier_data' in st.session_state:
-            del st.session_state.df_has_supplier_data
         st.rerun()
     
     if st.button(t("auto_update_btn"), use_container_width=True):
@@ -3233,7 +3226,7 @@ with st.sidebar:
                     if len(updated_orders) > 15:
                         st.write(f"... {t('and_more')} {len(updated_orders) - 15}")
                     
-                    st.cache_data.clear()
+                    clear_all_caches()
                     import time
                     time.sleep(3)
                     st.rerun()
@@ -3260,7 +3253,7 @@ with st.sidebar:
                     if len(updated_orders) > 15:
                         st.write(f"... {t('and_more')} {len(updated_orders) - 15}")
                     
-                    st.cache_data.clear()
+                    clear_all_caches()
                     import time
                     time.sleep(3)
                     st.rerun()
@@ -5678,7 +5671,7 @@ with tab1:
                                                 changes_made += 1
                                     
                                     if changes_made > 0:
-                                        st.cache_data.clear()
+                                        clear_all_caches()
                                         st.success(f"✅ עודכנו {changes_made} שורות!")
                                         st.rerun()
                                     else:
@@ -5693,7 +5686,7 @@ with tab1:
                                             success = update_sheet_status(row_indices, "orderd")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות לסטטוס הוזמן!")
-                                            st.cache_data.clear()
+                                            clear_all_caches()
                                             st.rerun()
                             
                             with btn_cols[2]:
@@ -5705,7 +5698,7 @@ with tab1:
                                             success = update_sheet_status(row_indices, "done!")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות לסטטוס נשלח!")
-                                            st.cache_data.clear()
+                                            clear_all_caches()
                                             st.rerun()
                                     
                                     if st.button(f"⚠️ נשלח ולא שולם ({len(selected)})", key=f"mark_sent_not_paid_{key}"):
@@ -6228,7 +6221,7 @@ with tab3:
                                             success = update_sheet_status(row_indices, "done!")
                                         if success:
                                             st.success(f"✅ עודכנו {len(row_indices)} הזמנות!")
-                                            st.cache_data.clear()
+                                            clear_all_caches()
                                             st.rerun()
                     
                     st.markdown("---")
