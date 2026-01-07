@@ -1101,21 +1101,25 @@ def send_unpaid_orders_report_email(orders_df, to_email):
         
         # Generate mark-as-paid token
         mark_paid_button = ""
-        if row_index:
+        # row_index should be an integer (row number in Google Sheet, 1-based, but we store as 2-based for header row)
+        if row_index and (isinstance(row_index, int) or (isinstance(row_index, (str, float)) and str(row_index).strip().isdigit())):
             try:
+                # Convert to int if needed
+                row_idx = int(row_index) if not isinstance(row_index, int) else row_index
                 secret = os.environ.get('SESSION_SECRET')
                 if secret and len(secret) >= 10:
-                    data = f"{order_num}:{row_index}:{secret}"
+                    data = f"{order_num}:{row_idx}:{secret}"
                     token = hashlib.sha256(data.encode()).hexdigest()[:16]
-                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_index}&token={token}"
+                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}&token={token}"
                     mark_paid_button = f"""
             <div style="margin-top: 15px; text-align: center;">
                 <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
-                    סמן כשולם (Done!)
+                    ✅ סמן כשולם (Done!)
                 </a>
             </div>
             """
-            except:
+            except Exception as e:
+                # Silently fail - button won't appear if there's an error
                 pass
         
         email_body += f"""
@@ -3483,6 +3487,13 @@ with st.sidebar:
                 temp_df_for_email['orderd'].fillna('').str.strip().str.contains('נשלח ולא שולם', na=False)
             )
             unpaid_orders_for_email = temp_df_for_email[status_mask].copy()
+            
+            # Ensure row_index exists for mark-as-paid functionality
+            if 'row_index' not in unpaid_orders_for_email.columns and not unpaid_orders_for_email.empty:
+                # Re-add row_index if missing (shouldn't happen, but just in case)
+                unpaid_orders_for_email = unpaid_orders_for_email.copy()
+                start_idx = unpaid_orders_for_email.index[0] if len(unpaid_orders_for_email) > 0 else 0
+                unpaid_orders_for_email['row_index'] = range(start_idx + 2, start_idx + 2 + len(unpaid_orders_for_email))
         
         unpaid_count = len(unpaid_orders_for_email)
         unpaid_tickets = int(pd.to_numeric(unpaid_orders_for_email.get('Qty', 0), errors='coerce').sum()) if not unpaid_orders_for_email.empty else 0
