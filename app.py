@@ -1363,10 +1363,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Disable automatic rerun on widget interaction - only rerun on explicit button clicks
-if 'disable_auto_rerun' not in st.session_state:
-    st.session_state.disable_auto_rerun = True
-
 import hashlib
 
 # Define constants and functions needed for mark_paid functionality BEFORE using them
@@ -3290,16 +3286,22 @@ with st.sidebar:
     
     temp_df_for_email = load_data_from_sheet()
     
+    # Use on_change with empty callback to prevent rerun on selectbox/text_input change
+    def empty_callback_email():
+        pass  # Do nothing - prevent rerun
+    
     report_type = st.selectbox(
         "בחר סוג דוח:",
         options=["📋 כרטיסים לרכישה", "💰 מכירות יומי", "📊 מכירות שבועי", "🔴 הזמנות שלא שולמו"],
-        key="email_report_type_selector"
+        key="email_report_type_selector",
+        on_change=empty_callback_email
     )
     
     email_recipient = st.text_input(
         "📬 שלח ל:",
         value=DEFAULT_NEW_ORDERS_EMAIL,
-        key="report_email_recipient"
+        key="report_email_recipient",
+        on_change=empty_callback_email
     )
     
     if report_type == "📋 כרטיסים לרכישה":
@@ -3331,10 +3333,15 @@ with st.sidebar:
         israel_tz = pytz.timezone('Israel')
         today = datetime.now(israel_tz).date()
         
+        # Use on_change with empty callback to prevent rerun on date input change
+        def empty_callback_date():
+            pass  # Do nothing - prevent rerun
+        
         selected_date = st.date_input(
             "בחר תאריך:",
             value=today,
-            key="daily_report_date_picker"
+            key="daily_report_date_picker",
+            on_change=empty_callback_date
         )
         selected_date_str = selected_date.strftime('%d/%m/%Y')
         
@@ -3384,17 +3391,23 @@ with st.sidebar:
         default_end = default_start + timedelta(days=6)
         
         col_start, col_end = st.columns(2)
+        # Use on_change with empty callback to prevent rerun on date input change
+        def empty_callback_weekly():
+            pass  # Do nothing - prevent rerun
+        
         with col_start:
             start_of_week = st.date_input(
                 "מתאריך:",
                 value=default_start,
-                key="weekly_report_start_date"
+                key="weekly_report_start_date",
+                on_change=empty_callback_weekly
             )
         with col_end:
             end_of_week = st.date_input(
                 "עד תאריך:",
                 value=default_end,
-                key="weekly_report_end_date"
+                key="weekly_report_end_date",
+                on_change=empty_callback_weekly
             )
         
         weekly_orders = pd.DataFrame()
