@@ -1036,6 +1036,7 @@ COMMISSION_RATES = {
     'tixstock': 0.03,
 }
 
+@st.cache_data(ttl=3600)
 def get_commission_rate(source_val):
     """Get commission rate for a source (0 if no commission)"""
     normalized = normalize_source(source_val)
@@ -1047,6 +1048,7 @@ def normalize_source(source_val):
         return ''
     return str(source_val).strip().lower()
 
+@st.cache_data(ttl=3600)
 def get_source_display_name(source_val):
     """Get display name for source with proper formatting"""
     normalized = normalize_source(source_val)
@@ -1056,6 +1058,7 @@ def get_source_display_name(source_val):
         return normalized.title()
     return '-'
 
+@st.cache_data(ttl=300, hash_funcs={pd.DataFrame: lambda x: hash(str(x.values.tobytes()) + str(x.columns.tolist()))})
 def get_sorted_event_options(dataframe, last_selected=None):
     """Get event names sorted by closest date to today (future first, then past).
     If last_selected is provided, it will be moved to the front of the list."""
@@ -1449,6 +1452,7 @@ def t(key):
     lang = st.session_state.get('language', 'he')
     return TRANSLATIONS.get(lang, TRANSLATIONS['en']).get(key, key)
 
+@st.cache_data(ttl=3600)
 def normalize_order_number(order_num):
     """
     מנקה ומנרמל מספר הזמנה - מסיר כל תו שאינו אות או מספר.
@@ -2022,6 +2026,7 @@ def parse_date_smart(date_str, event_name=None, date_hints=None):
     
     return None
 
+@st.cache_data(ttl=3600)
 def clean_numeric(value):
     """Clean numeric values by removing currency symbols and converting to float."""
     if pd.isna(value) or value == '' or value is None:
@@ -2052,6 +2057,7 @@ def get_exchange_rates():
     except Exception as e:
         return {'GBP': 1.18, 'USD': 0.93}
 
+@st.cache_data(ttl=3600)
 def convert_to_euro(value, rates=None):
     """המר כל מטבע לאירו עם שערים אמיתיים"""
     if pd.isna(value) or value == '' or value is None:
@@ -2226,6 +2232,7 @@ def load_data_from_sheet():
         load_data_from_sheet.clear()
         return pd.DataFrame()
 
+@st.cache_data(ttl=3600)
 def col_number_to_letter(col_num):
     """Convert column number (1-based) to Excel-style letter (A, B, ..., Z, AA, AB, ...)"""
     result = ""
@@ -2237,6 +2244,7 @@ def col_number_to_letter(col_num):
 
 from difflib import SequenceMatcher
 
+@st.cache_data(ttl=3600)
 def normalize_team_name(name):
     """נרמל שם קבוצה לצורך השוואה - שומר על שמות הקבוצות המקוריים"""
     import re
@@ -2256,6 +2264,7 @@ def normalize_team_name(name):
     name = ' '.join(name.split())
     return name.strip()
 
+@st.cache_data(ttl=3600)
 def extract_teams(event_name):
     """חלץ שני קבוצות משם אירוע"""
     import re
@@ -2275,6 +2284,7 @@ def extract_teams(event_name):
     
     return (normalize_team_name(event_name),)
 
+@st.cache_data(ttl=3600)
 def similarity_score(str1, str2):
     """חישוב דמיון בין 2 מחרוזות (0-1)"""
     if not str1 or not str2:
@@ -2326,6 +2336,7 @@ def are_same_event(event1, event2, date1, date2):
     
     return False
 
+@st.cache_data(ttl=3600)
 def normalize_event_name(name):
     """נרמל שם אירוע להשוואה - הסר vs, מקפים, סיומות קבוצות (לתאימות אחורה)"""
     import re
@@ -2424,6 +2435,7 @@ def display_category_summary(orders_df, key_prefix=""):
             revenue_parts.append(f"• {row['category']}: €{row['revenue']:,.0f} ({rev_pct:.0f}%)")
         st.markdown("\n".join(revenue_parts))
 
+@st.cache_data(ttl=300, hash_funcs={pd.DataFrame: lambda x: hash(str(x.values.tobytes()) + str(x.columns.tolist()))})
 def group_orders_by_event(df):
     """קבץ הזמנות לפי אירוע עם איחוד חכם (fuzzy matching)"""
     if df.empty:
