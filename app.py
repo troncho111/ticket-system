@@ -1388,9 +1388,15 @@ def get_gspread_client():
             
             # Step 1: Handle escaped newlines - convert \n (two characters: backslash + n) to actual newline
             # This is critical - JSON strings have "\\n" which needs to become actual "\n"
+            # Handle all variations: \n, \\n, \\\n, etc.
+            import re
+            # First, handle multiple backslashes (2+) followed by 'n' - do this BEFORE simple replace
+            # This handles cases like: \\n, \\\n, \\\\n, etc. -> all become actual newline
+            private_key = re.sub(r'\\{2,}n', '\n', private_key)
+            
+            # Then handle single escaped newline (\n -> actual newline)
+            # This handles the standard case where JSON has "\n" as a string
             if '\\n' in private_key:
-                # Replace escaped newlines with actual newlines
-                # This handles: "-----BEGIN PRIVATE KEY-----\\nMII..." -> "-----BEGIN PRIVATE KEY-----\nMII..."
                 private_key = private_key.replace('\\n', '\n')
             
             # Step 2: Handle case where newlines might have been converted to spaces
@@ -1468,20 +1474,75 @@ def get_gspread_client():
         # Create a copy to avoid modifying the original
         creds_dict_copy = creds_dict.copy()
         
-        # Final validation of private_key before passing to oauth2client
+        # Final validation and fix of private_key before passing to oauth2client
         if 'private_key' in creds_dict_copy:
             pk = creds_dict_copy['private_key']
-            # Ensure it's a string and has proper format
+            
+            # Ensure it's a string
             if not isinstance(pk, str):
                 raise ValueError(f"private_key צריך להיות string, אבל קיבלנו: {type(pk)}")
             
-            # Verify it has BEGIN and END markers
-            if '-----BEGIN PRIVATE KEY-----' not in pk or '-----END PRIVATE KEY-----' not in pk:
-                raise ValueError("private_key לא בפורמט PEM תקין - חסרים BEGIN/END markers")
+            # CRITICAL FIX: The private_key might be corrupted or incomplete
+            # Let's ensure it's properly formatted
             
-            # Verify it has newlines
-            if '\n' not in pk:
-                raise ValueError("private_key לא מכיל newlines - זה נדרש לפורמט PEM")
+            # 1. Remove any leading/trailing whitespace
+            pk = pk.strip()
+            
+            # 2. Ensure BEGIN marker is at the start
+            if not pk.startswith('-----BEGIN'):
+                begin_idx = pk.find('-----BEGIN')
+                if begin_idx > 0:
+                    pk = pk[begin_idx:]
+            
+            # 3. Ensure END marker is at the end
+            if not pk.rstrip().endswith('-----END PRIVATE KEY-----'):
+                end_idx = pk.rfind('-----END PRIVATE KEY-----')
+                if end_idx > 0:
+                    pk = pk[:end_idx + len('-----END PRIVATE KEY-----')]
+            
+            # 4. Verify the key is complete - check length (should be ~1600-1700 chars for RSA key)
+            if len(pk) < 1000:
+                raise ValueError(
+                    f"private_key נראה קצר מדי ({len(pk)} תווים). המפתח צריך להיות ~1600 תווים.\n"
+                    "המפתח כנראה נחתך או לא הועתק במלואו."
+                )
+            
+            # 5. Verify BEGIN and END markers
+            if '-----BEGIN PRIVATE KEY-----' not in pk:
+                raise ValueError("private_key לא מכיל '-----BEGIN PRIVATE KEY-----'")
+            
+            if '-----END PRIVATE KEY-----' not in pk:
+                raise ValueError("private_key לא מכיל '-----END PRIVATE KEY-----'")
+            
+            # 6. Extract and validate the key content
+            begin_marker = '-----BEGIN PRIVATE KEY-----'
+            end_marker = '-----END PRIVATE KEY-----'
+            begin_idx = pk.find(begin_marker)
+            end_idx = pk.find(end_marker)
+            
+            if begin_idx < 0 or end_idx < 0 or end_idx <= begin_idx:
+                raise ValueError("private_key לא בפורמט תקין - בעיה במיקום BEGIN/END markers")
+            
+            # Extract the actual key content (between markers)
+            key_content = pk[begin_idx + len(begin_marker):end_idx].strip()
+            
+            # Remove all whitespace and newlines to get pure base64
+            key_content_clean = key_content.replace('\n', '').replace(' ', '').replace('\r', '')
+            
+            # Validate key content length (RSA private key should be ~1600-1700 base64 chars)
+            if len(key_content_clean) < 1000:
+                raise ValueError(
+                    f"תוכן המפתח קצר מדי ({len(key_content_clean)} תווים). המפתח כנראה לא שלם.\n"
+                    "ודא שהעתקת את כל המפתח מה-JSON file."
+                )
+            
+            # Reconstruct the key with proper PEM format
+            # PEM format: lines of 64 characters
+            key_lines = [key_content_clean[i:i+64] for i in range(0, len(key_content_clean), 64)]
+            pk = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
+            
+            # Update the dict with the fixed key
+            creds_dict_copy['private_key'] = pk
         
         credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict_copy, scope)
         client = gspread.authorize(credentials)
@@ -1491,36 +1552,38 @@ def get_gspread_client():
         error_type = type(e).__name__
         
         # Provide specific error messages for common issues
-        if "seekable bit stream" in error_msg.lower() or "unsupportedsubstrateerror" in error_msg.lower():
+        if "seekable bit stream" in error_msg.lower() or "unsupportedsubstrateerror" in error_msg.lower() or "substrateunderrun" in error_msg.lower():
             # Check if we can see the private_key format
             private_key_preview = ""
+            private_key_length = 0
             if 'private_key' in creds_dict:
                 pk = str(creds_dict['private_key'])
+                private_key_length = len(pk)
                 if len(pk) > 0:
                     preview = pk[:100] + "..." if len(pk) > 100 else pk
-                    private_key_preview = f"\n**תצוגה מקדימה של private_key:** {preview}"
+                    private_key_preview = f"\n**תצוגה מקדימה של private_key:** {preview}\n**אורך המפתח:** {private_key_length} תווים"
+            
+            # Determine the specific issue
+            if "substrateunderrun" in error_msg.lower() or "short substrate" in error_msg.lower():
+                issue_desc = "ה-private_key לא שלם או נחתך - המפתח קצר מדי או פגום."
+                solution_extra = "\n**חשוב במיוחד:** ודא שהעתקת את כל המפתח במלואו - המפתח צריך להיות ~1600 תווים."
+            else:
+                issue_desc = "ה-private_key לא בפורמט הנכון."
+                solution_extra = ""
             
             detailed_msg = (
                 f"❌ **שגיאה בפורמט ה-private_key ב-GOOGLE_CREDENTIALS**\n\n"
-                f"**הבעיה:** ה-private_key לא בפורמט הנכון. זה קורה בדרך כלל כשה-private_key ב-Streamlit Secrets מוגדר עם escaped newlines.\n\n"
+                f"**הבעיה:** {issue_desc}\n\n"
                 f"**פתרון:**\n"
                 f"1. פתח את הקובץ JSON המקורי מה-Google Cloud Console\n"
-                f"2. העתק את כל התוכן של הקובץ (כולל ה-private_key)\n"
-                f"3. ב-Streamlit Cloud Secrets, הגדר את GOOGLE_CREDENTIALS כ-JSON מלא:\n"
-                f"   ```\n"
-                f"   GOOGLE_CREDENTIALS = {{\n"
-                f"     \"type\": \"service_account\",\n"
-                f"     \"project_id\": \"...\",\n"
-                f"     \"private_key\": \"-----BEGIN PRIVATE KEY-----\\n...\\n-----END PRIVATE KEY-----\\n\",\n"
-                f"     ...\n"
-                f"   }}\n"
-                f"   ```\n"
-                f"4. **חשוב:** ודא שה-private_key כולל `\\n` (escaped newlines) בתוך המחרוזת\n"
+                f"2. **העתק את כל התוכן** של הקובץ (כולל ה-private_key המלא)\n"
+                f"3. ב-Streamlit Cloud Secrets:\n"
+                f"   - לך ל-Settings > Secrets\n"
+                f"   - מחק את GOOGLE_CREDENTIALS הקיים\n"
+                f"   - הוסף מחדש עם כל ה-JSON המלא\n"
+                f"4. **ודא שה-private_key כולל `\\n` (escaped newlines) בתוך המחרוזת**\n"
                 f"5. שמור והפעל מחדש את האפליקציה\n\n"
-                f"**או** אם אתה משתמש ב-Secrets Editor ב-Streamlit Cloud:\n"
-                f"- העתק את כל ה-JSON כפי שהוא מהקובץ\n"
-                f"- הדבק ב-Secrets Editor\n"
-                f"- שמור\n\n"
+                f"{solution_extra}\n\n"
                 f"{private_key_preview}\n\n"
                 f"**סוג שגיאה:** {error_type}\n"
                 f"**פרטים:** {error_msg}"
