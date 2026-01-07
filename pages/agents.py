@@ -311,7 +311,15 @@ def show_order_details(row, docket_col, unique_key=""):
         display_field_with_copy("מחיר מקורי טוטל", total_original, f"total_orig_{unique_key}")
         display_field_with_copy("מחיר מכירה (€)", total_sold, f"total_sold_{unique_key}")
 
-df = load_data_from_sheet()
+# Load data with error handling
+try:
+    df = load_data_from_sheet()
+    if df.empty:
+        st.error("❌ לא נטענו נתונים מהגיליון. בדוק את החיבור ל-Google Sheets.")
+        st.stop()
+except Exception as e:
+    st.error(f"❌ שגיאה בטעינת נתונים: {str(e)}")
+    st.stop()
 
 DOCKET_COL = find_column(df, 'docket', 'number')
 ORDER_COL = 'Order number' if 'Order number' in df.columns else None
