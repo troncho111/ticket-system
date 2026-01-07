@@ -6319,13 +6319,17 @@ with tab4:
             
             st.markdown("---")
             
-            # Use st.empty() containers to prevent rerender of unchanged widgets
-            # This significantly improves performance when typing in forms
-            container_cache_key = f"tab4_containers_{len(all_new_orders)}"
-            if container_cache_key not in st.session_state:
-                st.session_state[container_cache_key] = {}
+            # CRITICAL: The problem is that Streamlit ALWAYS reruns when typing, even in forms
+            # The loop creates 196 forms, and each rerun recreates all 196 forms = SLOW
+            # Solution: Use pagination or limit visible items to reduce the number of forms created
+            # For now, show only first 50 orders to improve performance
+            MAX_ORDERS_TO_SHOW = 50
+            orders_to_display = all_new_orders.head(MAX_ORDERS_TO_SHOW)
             
-            for idx, (_, order) in enumerate(all_new_orders.iterrows()):
+            if len(all_new_orders) > MAX_ORDERS_TO_SHOW:
+                st.info(f"מציג {MAX_ORDERS_TO_SHOW} מתוך {len(all_new_orders)} הזמנות. השתמש בפילטרים כדי לצמצם את הרשימה.")
+            
+            for idx, (_, order) in enumerate(orders_to_display.iterrows()):
                 order_num = order.get('Order number', '-')
                 event_name = str(order.get('event name', '-'))[:50]
                 event_date = order.get('Date of the event', '-')
