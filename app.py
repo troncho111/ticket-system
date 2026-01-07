@@ -6278,16 +6278,26 @@ with tab4:
     tab4_status_col = 'orderd' if 'orderd' in fresh_df.columns else None
     
     if tab4_status_col:
-        # Filter for new or empty status
-        status_values = fresh_df[tab4_status_col].fillna('').astype(str).str.strip()
-        all_new_orders = fresh_df[(status_values.str.lower() == 'new') | (status_values == '')].copy()
+        # Cache filtered and sorted data to prevent recalculation on every rerun
+        # Use a hash of the dataframe to detect changes
+        df_hash = hash(str(fresh_df.index.tolist()[:10]) + str(fresh_df[tab4_status_col].iloc[:10].tolist()))
+        cache_key_all_new = f"tab4_all_new_orders_{df_hash}"
         
-        # Sort by row index (descending) to get newest entries first
-        if 'row_index' in all_new_orders.columns:
-            all_new_orders = all_new_orders.sort_values('row_index', ascending=False)
-        elif 'Order number' in all_new_orders.columns:
-            all_new_orders['order_num_sort'] = pd.to_numeric(all_new_orders['Order number'], errors='coerce')
-            all_new_orders = all_new_orders.sort_values('order_num_sort', ascending=False, na_position='last')
+        if cache_key_all_new not in st.session_state or st.session_state.get('tab4_needs_refresh', False):
+            # Filter for new or empty status
+            status_values = fresh_df[tab4_status_col].fillna('').astype(str).str.strip()
+            all_new_orders = fresh_df[(status_values.str.lower() == 'new') | (status_values == '')].copy()
+            
+            # Sort by row index (descending) to get newest entries first
+            if 'row_index' in all_new_orders.columns:
+                all_new_orders = all_new_orders.sort_values('row_index', ascending=False)
+            elif 'Order number' in all_new_orders.columns:
+                all_new_orders['order_num_sort'] = pd.to_numeric(all_new_orders['Order number'], errors='coerce')
+                all_new_orders = all_new_orders.sort_values('order_num_sort', ascending=False, na_position='last')
+            
+            st.session_state[cache_key_all_new] = all_new_orders
+        else:
+            all_new_orders = st.session_state[cache_key_all_new]
         
         if not all_new_orders.empty:
             st.success(f"📋 **{len(all_new_orders)} הזמנות חדשות** לטיפול")
