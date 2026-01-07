@@ -5465,11 +5465,7 @@ with tab1:
                                         st.info("לא זוהו שינויים")
                             
                             with btn_cols[1]:
-                                # Safety check: ensure 'Select' column exists
-                                if not edited_df.empty and 'Select' in edited_df.columns:
-                                    selected = edited_df[edited_df['Select'] == True]
-                                else:
-                                    selected = pd.DataFrame()
+                                selected = edited_df[edited_df['Select'] == True]
                                 if len(selected) > 0:
                                     if st.button(f"🛒 סמן {len(selected)} כהוזמן", key=f"mark_orderd_{key}", type="secondary"):
                                         row_indices = selected['row_index'].tolist()
@@ -5481,11 +5477,7 @@ with tab1:
                                             st.rerun()
                             
                             with btn_cols[2]:
-                                # Safety check: ensure 'Select' column exists
-                                if not edited_df.empty and 'Select' in edited_df.columns:
-                                    selected = edited_df[edited_df['Select'] == True]
-                                else:
-                                    selected = pd.DataFrame()
+                                selected = edited_df[edited_df['Select'] == True]
                                 if len(selected) > 0:
                                     if st.button(f"📤 סמן {len(selected)} כנשלח", key=f"mark_sent_{key}", type="primary"):
                                         row_indices = selected['row_index'].tolist()
@@ -5945,13 +5937,8 @@ with tab3:
                         
                         if available_cols:
                             display_df = orders_df[available_cols].copy()
-                            # Ensure Select column exists even if DataFrame is empty
-                            if 'Select' not in display_df.columns:
-                                display_df.insert(0, 'Select', False)
-                            if 'row_index' in orders_df.columns:
-                                display_df['row_index'] = orders_df['row_index']
-                            elif 'row_index' not in display_df.columns:
-                                display_df['row_index'] = range(2, len(display_df) + 2)
+                            display_df.insert(0, 'Select', False)
+                            display_df['row_index'] = orders_df['row_index']
                             
                             if 'orderd' in display_df.columns:
                                 def format_status_op(status_val):
@@ -6003,11 +5990,7 @@ with tab3:
                                 key=f"op_editor_{key}"
                             )
                             
-                            # Safety check: ensure 'Select' column exists
-                            if not edited_df.empty and 'Select' in edited_df.columns:
-                                selected = edited_df[edited_df['Select'] == True]
-                            else:
-                                selected = pd.DataFrame()
+                            selected = edited_df[edited_df['Select'] == True]
                             if len(selected) > 0:
                                 btn_cols = st.columns([2, 1, 1])
                                 with btn_cols[0]:
@@ -6030,14 +6013,8 @@ with tab4:
     st.header("🆕 הזמנות חדשות לטיפול")
     st.markdown("*כל ההזמנות עם סטטוס 'New' או ללא סטטוס - עדכן מספר הזמנה ספק וסטטוס*")
     
-    # Use session state to cache data and prevent reload on every rerun
-    # Only reload if explicitly requested or if data doesn't exist
-    if 'tab4_fresh_df' not in st.session_state or st.session_state.get('tab4_needs_refresh', False):
-        with st.spinner("טוען נתונים..."):
-            st.session_state.tab4_fresh_df = load_data_from_sheet()
-            st.session_state.tab4_needs_refresh = False
-    
-    fresh_df = st.session_state.tab4_fresh_df
+    # Load FRESH data directly - ignore sidebar filters
+    fresh_df = load_data_from_sheet()
     tab4_status_col = 'orderd' if 'orderd' in fresh_df.columns else None
     
     if tab4_status_col:
@@ -6058,29 +6035,24 @@ with tab4:
             # Refresh button
             if st.button("🔄 רענן נתונים", key="refresh_new_orders"):
                 st.cache_data.clear()
-                st.session_state.tab4_needs_refresh = True
                 st.rerun()
             
             st.markdown("---")
             
-            # Use st.fragment to prevent full app rerun when typing in forms
-            # This isolates the rerun to only the fragment, not the entire app
-            @st.fragment
-            def render_order_forms(orders_df, status_col):
-                for idx, (_, order) in enumerate(orders_df.iterrows()):
-                    order_num = order.get('Order number', '-')
-                    event_name = str(order.get('event name', '-'))[:50]
-                    event_date = order.get('Date of the event', '-')
-                    order_date = order.get('order date', '-')
-                    qty = order.get('Qty', '-')
-                    total = order.get('TOTAL', '-')
-                    source = order.get('source', '-')
-                    current_supp_order = str(order.get('SUPP order number', '')).strip()
-                    current_status = str(order.get(status_col, '')).strip()
-                    row_idx = order.get('row_index', None)
-                    category = order.get('Category / Section', '-')
-                    
-                    is_ordered = current_status.lower() == 'orderd'
+            for idx, (_, order) in enumerate(all_new_orders.iterrows()):
+                order_num = order.get('Order number', '-')
+                event_name = str(order.get('event name', '-'))[:50]
+                event_date = order.get('Date of the event', '-')
+                order_date = order.get('order date', '-')
+                qty = order.get('Qty', '-')
+                total = order.get('TOTAL', '-')
+                source = order.get('source', '-')
+                current_supp_order = str(order.get('SUPP order number', '')).strip()
+                current_status = str(order.get(tab4_status_col, '')).strip()
+                row_idx = order.get('row_index', None)
+                category = order.get('Category / Section', '-')
+                
+                is_ordered = current_status.lower() == 'orderd'
                 
                 with st.container(border=True):
                     if is_ordered:
@@ -6099,44 +6071,35 @@ with tab4:
                         st.markdown(f"### 🎫 הזמנה #{order_num}")
                         st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
                     
-                    # Use form to prevent rerun on input change - only update on button click
-                    with st.form(key=f"order_form_{idx}_{order_num}", clear_on_submit=False):
-                        col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
-                        with col1:
-                            new_supp_order = st.text_input(
-                                "מס' הזמנה ספק",
-                                value=current_supp_order,
-                                key=f"tab4_supp_{idx}_{order_num}",
-                                placeholder="הכנס מספר הזמנה ספק"
-                            )
-                        with col2:
-                            status_options = ['new', 'orderd', 'done!', 'old no data']
-                            current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
-                            new_status = st.selectbox(
-                                "סטטוס",
-                                options=status_options,
-                                index=current_idx,
-                                key=f"tab4_status_{idx}_{order_num}"
-                            )
-                        with col3:
-                            supp_price_val = order.get('SUPP PRICE', '')
-                            new_supp_price = st.text_input(
-                                "מחיר ספק",
-                                value=str(supp_price_val) if supp_price_val else "",
-                                key=f"tab4_price_{idx}_{order_num}",
-                                placeholder="מחיר"
-                            )
-                        with col4:
-                            st.write("")
-                            st.write("")
-                            save_clicked = st.form_submit_button("💾 שמור", type="primary", use_container_width=True)
-                        with col5:
-                            st.write("")
-                            st.write("")
-                            delete_clicked = st.form_submit_button("🗑️ מחק", type="secondary", use_container_width=True)
-                        
-                        # Handle save button click INSIDE form
-                        if save_clicked:
+                    col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
+                    with col1:
+                        new_supp_order = st.text_input(
+                            "מס' הזמנה ספק",
+                            value=current_supp_order,
+                            key=f"tab4_supp_{idx}_{order_num}",
+                            placeholder="הכנס מספר הזמנה ספק"
+                        )
+                    with col2:
+                        status_options = ['new', 'orderd', 'done!', 'old no data']
+                        current_idx = status_options.index(current_status.lower()) if current_status.lower() in status_options else 0
+                        new_status = st.selectbox(
+                            "סטטוס",
+                            options=status_options,
+                            index=current_idx,
+                            key=f"tab4_status_{idx}_{order_num}"
+                        )
+                    with col3:
+                        supp_price_val = order.get('SUPP PRICE', '')
+                        new_supp_price = st.text_input(
+                            "מחיר ספק",
+                            value=str(supp_price_val) if supp_price_val else "",
+                            key=f"tab4_price_{idx}_{order_num}",
+                            placeholder="מחיר"
+                        )
+                    with col4:
+                        st.write("")
+                        st.write("")
+                        if st.button("💾 שמור", key=f"tab4_save_{idx}_{order_num}", type="primary"):
                             if row_idx:
                                 try:
                                     client = get_gspread_client()
@@ -6173,7 +6136,6 @@ with tab4:
                                         worksheet.batch_update(updates)
                                         st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
                                         st.cache_data.clear()
-                                        st.session_state.tab4_needs_refresh = True
                                         time.sleep(0.5)
                                         st.rerun()
                                     else:
@@ -6182,23 +6144,20 @@ with tab4:
                                     st.error(f"שגיאה: {str(e)}")
                             else:
                                 st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
-                        
-                        # Handle delete button click INSIDE form
-                        if delete_clicked:
+                    with col5:
+                        st.write("")
+                        st.write("")
+                        if st.button("🗑️ מחק", key=f"tab4_delete_{idx}_{order_num}", type="secondary"):
                             if row_idx:
                                 with st.spinner("מוחק הזמנה..."):
                                     success = delete_order_row(row_idx)
                                 if success:
                                     st.success(f"✅ הזמנה #{order_num} נמחקה!")
                                     st.cache_data.clear()
-                                    st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
                             else:
-                                st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
-            
-            # Call the fragment function - pass status_col as parameter
-            render_order_forms(all_new_orders, tab4_status_col)
+                                st.warning("לא נמצא מספר שורה")
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:

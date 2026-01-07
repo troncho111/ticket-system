@@ -311,15 +311,7 @@ def show_order_details(row, docket_col, unique_key=""):
         display_field_with_copy("מחיר מקורי טוטל", total_original, f"total_orig_{unique_key}")
         display_field_with_copy("מחיר מכירה (€)", total_sold, f"total_sold_{unique_key}")
 
-# Load data with error handling
-try:
-    df = load_data_from_sheet()
-    if df.empty:
-        st.error("❌ לא נטענו נתונים מהגיליון. בדוק את החיבור ל-Google Sheets.")
-        st.stop()
-except Exception as e:
-    st.error(f"❌ שגיאה בטעינת נתונים: {str(e)}")
-    st.stop()
+df = load_data_from_sheet()
 
 DOCKET_COL = find_column(df, 'docket', 'number')
 ORDER_COL = 'Order number' if 'Order number' in df.columns else None
@@ -892,27 +884,14 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
-            # st.data_editor - CRITICAL: Do NOT use key to avoid StreamlitValueAssignmentNotAllowedError
-            # The key causes state conflicts when the DataFrame structure changes
-            # Make sure edit_df is a fresh copy
+            # Use st.data_editor WITHOUT key to avoid StreamlitValueAssignmentNotAllowedError
+            # The key parameter causes state conflicts in Streamlit's session_state management
             edit_df_for_editor = edit_df.copy()
             
-            # CRITICAL: Clear any existing session state for data_editor to prevent conflicts
-            # This ensures clean state on each rerun
-            editor_state_keys = [k for k in st.session_state.keys() if 'supplier_management_editor' in str(k) or 'data_editor' in str(k).lower()]
-            for key in editor_state_keys:
-                try:
-                    del st.session_state[key]
-                except:
-                    pass
-            
-            # Ensure the DataFrame is not empty
             if edit_df_for_editor.empty:
                 st.warning("אין נתונים לעריכה")
                 edited_df = pd.DataFrame()
             else:
-                # Use st.data_editor WITHOUT key to avoid StreamlitValueAssignmentNotAllowedError
-                # This means state won't persist across reruns, but it will work without errors
                 edited_df = st.data_editor(
                     edit_df_for_editor,
                     column_config=column_config,
