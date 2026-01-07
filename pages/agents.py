@@ -47,84 +47,21 @@ SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
 WORKSHEET_INDEX = 0
 
 def get_gspread_client():
-    """Create and return a gspread client using credentials from environment."""
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    
-    # Try to get from Streamlit secrets first (if available)
-    creds_json = None
-    try:
-        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
-            creds_json = st.secrets['GOOGLE_CREDENTIALS']
-    except:
-        pass
-    
-    # Fallback to environment variable
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     if not creds_json:
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment")
     
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
-    
-    # Handle different input formats
-    try:
-        if isinstance(creds_json, dict):
-            creds_dict = creds_json
-        elif isinstance(creds_json, str):
-            creds_dict = json.loads(creds_json)
-        else:
-            creds_dict = dict(creds_json)
-        
-        # Ensure private_key is properly formatted (handle escaped newlines)
-        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
-            private_key = creds_dict['private_key']
-            import re
-            private_key = re.sub(r'\\{2,}n', '\n', private_key)
-            if '\\n' in private_key:
-                private_key = private_key.replace('\\n', '\n')
-            if '-----BEGIN PRIVATE KEY----- ' in private_key:
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
-            
-            if '-----BEGIN PRIVATE KEY-----' not in private_key or '-----END PRIVATE KEY-----' not in private_key:
-                raise ValueError("private_key לא תקין - חסרים BEGIN/END markers")
-            
-            if '\n' not in private_key:
-                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
-                end_idx = private_key.find('-----END PRIVATE KEY-----')
-                if begin_idx >= 0 and end_idx > begin_idx:
-                    begin_marker = '-----BEGIN PRIVATE KEY-----'
-                    end_marker = '-----END PRIVATE KEY-----'
-                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
-                    key_content = key_content.replace(' ', '')
-                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
-                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
-            
-            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
-            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
-                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
-            
-            creds_dict['private_key'] = private_key
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
-    
-    required_fields = ['type', 'project_id', 'private_key', 'client_email']
-    missing_fields = [f for f in required_fields if f not in creds_dict]
-    if missing_fields:
-        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
-    
-    try:
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(credentials)
-        return client
-    except Exception as e:
-        raise ValueError(f"Error creating gspread client: {str(e)}")
+    if isinstance(creds_json, str):
+        creds_dict = json.loads(creds_json)
+    else:
+        creds_dict = dict(creds_json)
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(credentials)
 
 def find_column(df, *keywords):
     """Find column containing all keywords (case-insensitive)"""
@@ -947,14 +884,14 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
-            # Use st.data_editor WITHOUT key to avoid StreamlitValueAssignmentNotAllowedError
             edited_df = st.data_editor(
                 edit_df,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
                 num_rows="fixed",
-                hide_index=True
+                hide_index=True,
+                key="docket_editor"
             )
             
             col_save, col_info = st.columns([1, 3])
