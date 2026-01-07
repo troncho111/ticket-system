@@ -1024,6 +1024,10 @@ elif selected_tab == "📦 ניהול ספקים":
             cols_order = ['בחר'] + [col for col in edit_df_with_selection.columns if col != 'בחר']
             edit_df_with_selection = edit_df_with_selection[cols_order]
             
+            # Use on_change with empty callback to prevent rerun on cell edit
+            def empty_callback_docket():
+                pass  # Do nothing - prevent rerun
+            
             edited_df = st.data_editor(
                 edit_df_with_selection,
                 column_config=column_config,
@@ -1031,7 +1035,8 @@ elif selected_tab == "📦 ניהול ספקים":
                 height=450,
                 num_rows="fixed",
                 hide_index=True,
-                key="docket_editor"
+                key="docket_editor",
+                on_change=empty_callback_docket
             )
             
             # Update selected rows based on checkbox column
@@ -1276,18 +1281,18 @@ elif selected_tab == "➕ הוספה ידנית":
             st.error("❌ יש להזין מחיר לכרטיס")
         else:
             order_data = {
-                    'order date': current_datetime,
-                    'orderd': selected_status,
-                    'source': final_source,
-                    'Order number': order_number,
-                    'docket number': docket_number,
-                    'event name': event_name,
-                    'Date of the event': event_date,
-                    'Category / Section': category,
-                    'Qty': quantity,
-                    'Price sold': f"{currency}{price_per_ticket:.2f}",
-                    'TOTAL': f"{currency}{total:.2f}",
-                }
+                'order date': current_datetime,
+                'orderd': selected_status,
+                'source': final_source,
+                'Order number': order_number,
+                'docket number': docket_number,
+                'event name': event_name,
+                'Date of the event': event_date,
+                'Category / Section': category,
+                'Qty': quantity,
+                'Price sold': f"{currency}{price_per_ticket:.2f}",
+                'TOTAL': f"{currency}{total:.2f}",
+            }
                 
                 with st.spinner("מוסיף הזמנה לגוגל שיטס..."):
                     success, message = add_new_order_to_sheet(order_data)

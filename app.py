@@ -1363,6 +1363,10 @@ st.set_page_config(
     layout="wide"
 )
 
+# Disable automatic rerun on widget interaction - only rerun on explicit button clicks
+if 'disable_auto_rerun' not in st.session_state:
+    st.session_state.disable_auto_rerun = True
+
 import hashlib
 
 # Define constants and functions needed for mark_paid functionality BEFORE using them
@@ -5599,13 +5603,18 @@ with tab1:
                             
                             show_cols = ['Select'] + available_cols
                             
+                            # Use on_change with empty callback to prevent rerun on cell edit
+                            def empty_callback():
+                                pass  # Do nothing - prevent rerun
+            
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=column_config,
                                 disabled=non_editable_cols + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=f"editor_{key}"
+                                key=f"editor_{key}",
+                                on_change=empty_callback
                             )
                             
                             btn_cols = st.columns([2, 2, 2, 1])
@@ -6164,13 +6173,18 @@ with tab3:
                             
                             show_cols = ['Select'] + available_cols
                             
+                            # Use on_change with empty callback to prevent rerun on cell edit
+                            def empty_callback_op():
+                                pass  # Do nothing - prevent rerun
+            
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
                                 column_config=op_column_config,
                                 disabled=[col for col in show_cols if col != 'Select'] + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=f"op_editor_{key}"
+                                key=f"op_editor_{key}",
+                                on_change=empty_callback_op
                             )
                             
                             selected = edited_df[edited_df['Select'] == True]
