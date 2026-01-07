@@ -1152,20 +1152,41 @@ def send_unpaid_orders_report_email(orders_df, to_email):
         
         # Get row_index - try multiple ways
         row_idx = None
-        if 'row_index' in order:
-            row_idx_val = order['row_index']
-            if pd.notna(row_idx_val):
-                try:
-                    row_idx = int(row_idx_val)
-                except:
+        try:
+            # Method 1: Direct access
+            if 'row_index' in order:
+                row_idx_val = order['row_index']
+                if pd.notna(row_idx_val) and row_idx_val != '':
                     try:
-                        row_idx = int(float(row_idx_val))
+                        row_idx = int(row_idx_val)
                     except:
-                        pass
+                        try:
+                            row_idx = int(float(row_idx_val))
+                        except:
+                            pass
+            
+            # Method 2: Try to get from index if row_index column doesn't exist
+            if not row_idx or row_idx <= 1:
+                # Try to use the DataFrame index + 2 (since row 1 is header)
+                try:
+                    # Get the original index from the DataFrame
+                    if hasattr(orders_df, 'index'):
+                        original_idx = orders_df.index[idx]
+                        # Try to get row_index from original dataframe if available
+                        # This is a fallback
+                        row_idx = original_idx + 2 if original_idx >= 0 else None
+                except:
+                    pass
+        except:
+            pass
         
         # If row_index is valid, create the button
         if row_idx and row_idx > 1:  # row_index should be >= 2 (row 1 is header)
             try:
+                # Ensure app_url is valid
+                if not app_url or app_url.lower() in ['none', 'null', '']:
+                    app_url = 'https://ticket-system-khw95fed4ynaufhjbcugi5.streamlit.app'
+                
                 # Try to get SESSION_SECRET from environment or secrets
                 secret = None
                 try:
@@ -1180,9 +1201,9 @@ def send_unpaid_orders_report_email(orders_df, to_email):
                     except:
                         pass
                 
-                # Validate app_url before using it
-                if app_url and app_url.lower() not in ['none', 'null', ''] and app_url.startswith('http'):
-                    # Create URL with or without token
+                # Create URL - always create it if we have valid app_url and row_idx
+                mark_paid_url = None
+                if app_url and app_url.startswith('http') and row_idx:
                     if secret and len(secret) >= 10:
                         # With token (secure)
                         data = f"{order_num}:{row_idx}:{secret}"
@@ -1191,12 +1212,10 @@ def send_unpaid_orders_report_email(orders_df, to_email):
                     else:
                         # Without token (less secure, but works)
                         mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
-                else:
-                    # app_url is invalid, skip button
-                    mark_paid_url = None
                 
-                    if mark_paid_url:
-                        mark_paid_button = f"""
+                # Create button if URL was created successfully
+                if mark_paid_url:
+                    mark_paid_button = f"""
             <div style="margin-top: 15px; text-align: center;">
                 <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
                     ✅ סמן כשולם (Done!)
@@ -1204,8 +1223,19 @@ def send_unpaid_orders_report_email(orders_df, to_email):
             </div>
             """
             except Exception as e:
-                # If there's an error, don't create button
-                pass
+                # If there's an error, try to create button anyway with basic URL
+                try:
+                    if app_url and app_url.startswith('http') and row_idx:
+                        basic_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
+                        mark_paid_button = f"""
+            <div style="margin-top: 15px; text-align: center;">
+                <a href="{basic_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
+                    ✅ סמן כשולם (Done!)
+                </a>
+            </div>
+            """
+                except:
+                    pass
         
         email_body += f"""
         <div style="background: #fee2e2; padding: 15px; margin: 10px 0; border-radius: 8px; border-right: 4px solid #dc2626;">
