@@ -1043,27 +1043,66 @@ def send_unpaid_orders_report_email(orders_df, to_email):
     now = datetime.now(israel_tz)
     
     # Get app base URL for mark-as-paid links
-    # Try to get from Streamlit secrets first, then environment, then default
+    # Try multiple methods to get the correct URL
     app_url = None
+    
+    # Method 1: Try Streamlit Secrets
     try:
-        if hasattr(st, 'secrets') and 'APP_BASE_URL' in st.secrets:
-            app_url = st.secrets['APP_BASE_URL']
+        if hasattr(st, 'secrets'):
+            if 'APP_BASE_URL' in st.secrets:
+                app_url = st.secrets['APP_BASE_URL']
+            elif hasattr(st.secrets, 'get'):
+                app_url = st.secrets.get('APP_BASE_URL')
     except:
         pass
     
+    # Method 2: Try environment variable
     if not app_url:
         app_url = os.environ.get('APP_BASE_URL', None)
     
+    # Method 3: Try to get from Streamlit config (for Streamlit Cloud)
     if not app_url:
-        # Try to get from Streamlit config
         try:
-            import streamlit as st_module
-            if hasattr(st_module, 'config') and hasattr(st_module.config, 'server'):
-                # For Streamlit Cloud, we can try to construct the URL
-                # But for now, use a default that works
-                app_url = 'https://workspace-yehudatiktik.replit.app'
+            # For Streamlit Cloud, try to get the URL from the request
+            import streamlit.web.server.websocket_headers as ws_headers
+            try:
+                headers = ws_headers._get_websocket_headers()
+                if headers and 'host' in headers:
+                    host = headers.get('host', '')
+                    if host and 'streamlit.app' in host:
+                        app_url = f"https://{host}"
+            except:
+                pass
         except:
-            app_url = 'https://workspace-yehudatiktik.replit.app'
+            pass
+    
+    # Method 4: Default fallback - MUST have a valid URL
+    # IMPORTANT: User must set APP_BASE_URL in Streamlit Cloud Secrets!
+    if not app_url or app_url.lower() in ['none', 'null', '']:
+        # Try to construct Streamlit Cloud URL from common patterns
+        # But this is a fallback - user should set APP_BASE_URL in secrets
+        try:
+            # Check if we're on Streamlit Cloud by looking at environment
+            streamlit_cloud_url = os.environ.get('STREAMLIT_CLOUD_URL', None)
+            if streamlit_cloud_url:
+                app_url = streamlit_cloud_url
+            else:
+                # Last resort - but this won't work, user must set it
+                app_url = None  # Will cause error message
+        except:
+            app_url = None
+    
+    # Final validation - warn if URL is missing but still send email
+    url_warning = ""
+    if not app_url or app_url.lower() in ['none', 'null', '']:
+        url_warning = """
+<div style="background: #fff3cd; padding: 15px; margin: 20px 0; border-radius: 8px; border-right: 4px solid #ffc107;">
+<p style="color: #856404; margin: 0;"><strong>⚠️ הערה:</strong> כפתור "סמן כשולם" לא זמין כי כתובת האפליקציה לא מוגדרת.</p>
+<p style="color: #856404; margin: 10px 0 0 0;">💡 <strong>פתרון:</strong> הוסף ב-Streamlit Cloud Secrets:</p>
+<p style="color: #856404; margin: 5px 0; font-family: monospace; background: #fff; padding: 5px; border-radius: 3px;">APP_BASE_URL = "https://your-app-name.streamlit.app"</p>
+</div>
+"""
+        app_url = None  # Set to None so buttons won't be created
     
     # Calculate totals
     total_amount = 0
@@ -1152,17 +1191,23 @@ def send_unpaid_orders_report_email(orders_df, to_email):
                     except:
                         pass
                 
-                # Create URL with or without token
-                if secret and len(secret) >= 10:
-                    # With token (secure)
-                    data = f"{order_num}:{row_idx}:{secret}"
-                    token = hashlib.sha256(data.encode()).hexdigest()[:16]
-                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}&token={token}"
+                # Validate app_url before using it
+                if app_url and app_url.lower() not in ['none', 'null', ''] and app_url.startswith('http'):
+                    # Create URL with or without token
+                    if secret and len(secret) >= 10:
+                        # With token (secure)
+                        data = f"{order_num}:{row_idx}:{secret}"
+                        token = hashlib.sha256(data.encode()).hexdigest()[:16]
+                        mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}&token={token}"
+                    else:
+                        # Without token (less secure, but works)
+                        mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
                 else:
-                    # Without token (less secure, but works)
-                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
+                    # app_url is invalid, skip button
+                    mark_paid_url = None
                 
-                mark_paid_button = f"""
+                    if mark_paid_url:
+                        mark_paid_button = f"""
             <div style="margin-top: 15px; text-align: center;">
                 <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
                     ✅ סמן כשולם (Done!)
@@ -1170,18 +1215,8 @@ def send_unpaid_orders_report_email(orders_df, to_email):
             </div>
             """
             except Exception as e:
-                # Even if there's an error, try to create a basic button
-                try:
-                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
-                    mark_paid_button = f"""
-            <div style="margin-top: 15px; text-align: center;">
-                <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
-                    ✅ סמן כשולם (Done!)
-                </a>
-            </div>
-            """
-                except:
-                    pass
+                # If there's an error, don't create button
+                pass
         
         email_body += f"""
         <div style="background: #fee2e2; padding: 15px; margin: 10px 0; border-radius: 8px; border-right: 4px solid #dc2626;">
@@ -1207,6 +1242,10 @@ def send_unpaid_orders_report_email(orders_df, to_email):
 <h2 style="margin: 0;">סה"כ לגבייה: €{total_amount:,.2f}</h2>
 </div>
 """
+    
+    # Add URL warning if needed
+    if url_warning:
+        email_body += url_warning
     
     email_body += """
 </div>
