@@ -6295,48 +6295,48 @@ with tab4:
                     
                     # Handle save button click
                     if save_clicked:
-                            if row_idx:
-                                try:
-                                    client = get_gspread_client()
-                                    sheet = client.open(SHEET_NAME)
-                                    worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
-                                    headers = worksheet.row_values(1)
-                                    
-                                    supp_order_col_idx = None
-                                    status_col_idx = None
-                                    supp_price_col_idx = None
-                                    for i, h in enumerate(headers):
-                                        h_lower = h.strip().lower()
-                                        if h_lower in ['supp order number', 'supp order']:
-                                            supp_order_col_idx = i + 1
-                                        if h_lower == 'orderd':
-                                            status_col_idx = i + 1
-                                        if h_lower == 'supp price':
-                                            supp_price_col_idx = i + 1
-                                    
-                                    updates = []
-                                    if supp_order_col_idx and new_supp_order != current_supp_order:
-                                        col_letter = col_number_to_letter(supp_order_col_idx)
-                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_order]]})
-                                    
-                                    if status_col_idx and new_status != current_status:
-                                        col_letter = col_number_to_letter(status_col_idx)
-                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_status]]})
-                                    
-                                    if supp_price_col_idx and new_supp_price and new_supp_price != str(supp_price_val):
-                                        col_letter = col_number_to_letter(supp_price_col_idx)
-                                        updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_price]]})
-                                    
-                                    if updates:
-                                        worksheet.batch_update(updates)
-                                        st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
-                                        st.cache_data.clear()
-                                        time.sleep(0.5)
-                                        st.rerun()
-                                    else:
-                                        st.info("אין שינויים לשמור")
-                                except Exception as e:
-                                    st.error(f"שגיאה: {str(e)}")
+                        if row_idx:
+                            try:
+                                client = get_gspread_client()
+                                sheet = client.open(SHEET_NAME)
+                                worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
+                                headers = worksheet.row_values(1)
+                                
+                                supp_order_col_idx = None
+                                status_col_idx = None
+                                supp_price_col_idx = None
+                                for i, h in enumerate(headers):
+                                    h_lower = h.strip().lower()
+                                    if h_lower in ['supp order number', 'supp order']:
+                                        supp_order_col_idx = i + 1
+                                    if h_lower == 'orderd':
+                                        status_col_idx = i + 1
+                                    if h_lower == 'supp price':
+                                        supp_price_col_idx = i + 1
+                                
+                                updates = []
+                                if supp_order_col_idx and new_supp_order != current_supp_order:
+                                    col_letter = col_number_to_letter(supp_order_col_idx)
+                                    updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_order]]})
+                                
+                                if status_col_idx and new_status != current_status:
+                                    col_letter = col_number_to_letter(status_col_idx)
+                                    updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_status]]})
+                                
+                                if supp_price_col_idx and new_supp_price and new_supp_price != str(supp_price_val):
+                                    col_letter = col_number_to_letter(supp_price_col_idx)
+                                    updates.append({'range': f'{col_letter}{row_idx}', 'values': [[new_supp_price]]})
+                                
+                                if updates:
+                                    worksheet.batch_update(updates)
+                                    st.success(f"✅ הזמנה #{order_num} עודכנה בהצלחה!")
+                                    st.cache_data.clear()
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.info("אין שינויים לשמור")
+                            except Exception as e:
+                                st.error(f"שגיאה: {str(e)}")
                         else:
                             st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
                     
