@@ -6339,7 +6339,7 @@ with tab4:
                     is_ordered = current_status.lower() == 'orderd'
                     
                     with st.container(border=True):
-                    if is_ordered:
+                        if is_ordered:
                         st.markdown("""
                         <style>
                         div[data-testid="stVerticalBlockBorderWrapper"]:has(h3:contains("הזמנה")) {
