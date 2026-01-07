@@ -1024,9 +1024,10 @@ elif selected_tab == "📦 ניהול ספקים":
             cols_order = ['בחר'] + [col for col in edit_df_with_selection.columns if col != 'בחר']
             edit_df_with_selection = edit_df_with_selection[cols_order]
             
-            # Use on_change with empty callback to prevent rerun on cell edit
-            def empty_callback_docket():
-                pass  # Do nothing - prevent rerun
+            # Store previous state to detect changes
+            docket_editor_key = "docket_editor"
+            if docket_editor_key not in st.session_state:
+                st.session_state[docket_editor_key] = None
             
             edited_df = st.data_editor(
                 edit_df_with_selection,
@@ -1035,9 +1036,11 @@ elif selected_tab == "📦 ניהול ספקים":
                 height=450,
                 num_rows="fixed",
                 hide_index=True,
-                key="docket_editor",
-                on_change=empty_callback_docket
+                key=docket_editor_key
             )
+            
+            # Only process if button clicked, not on every edit
+            # The button click will trigger the save logic
             
             # Update selected rows based on checkbox column
             if 'בחר' in edited_df.columns:
@@ -1293,24 +1296,24 @@ elif selected_tab == "➕ הוספה ידנית":
                 'Price sold': f"{currency}{price_per_ticket:.2f}",
                 'TOTAL': f"{currency}{total:.2f}",
             }
+            
+            with st.spinner("מוסיף הזמנה לגוגל שיטס..."):
+                success, message = add_new_order_to_sheet(order_data)
                 
-                with st.spinner("מוסיף הזמנה לגוגל שיטס..."):
-                    success, message = add_new_order_to_sheet(order_data)
-                    
-                    if success:
-                        load_data_from_sheet.clear()
-                        st.success(f"✅ {message}")
-                        st.balloons()
-                        st.markdown(f"""
-                        **פרטי ההזמנה שנוספה:**
-                        - מספר הזמנה: `{order_number}`
-                        - אירוע: `{event_name}`
-                        - כמות: `{quantity}`
-                        - מחיר לכרטיס: `{currency}{price_per_ticket:.2f}`
-                        - סה"כ (יחושב בשיטס): `{currency}{total:.2f}`
-                        """)
-                    else:
-                        st.error(f"❌ {message}")
+                if success:
+                    load_data_from_sheet.clear()
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                    st.markdown(f"""
+                    **פרטי ההזמנה שנוספה:**
+                    - מספר הזמנה: `{order_number}`
+                    - אירוע: `{event_name}`
+                    - כמות: `{quantity}`
+                    - מחיר לכרטיס: `{currency}{price_per_ticket:.2f}`
+                    - סה"כ (יחושב בשיטס): `{currency}{total:.2f}`
+                    """)
+                else:
+                    st.error(f"❌ {message}")
     
     # Handle clear button
     if clear_clicked:

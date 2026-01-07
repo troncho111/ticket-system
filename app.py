@@ -5616,9 +5616,10 @@ with tab1:
                             
                             show_cols = ['Select'] + available_cols
                             
-                            # Use on_change with empty callback to prevent rerun on cell edit
-                            def empty_callback():
-                                pass  # Do nothing - prevent rerun
+                            # Store previous state to detect changes
+                            editor_key = f"editor_{key}"
+                            if editor_key not in st.session_state:
+                                st.session_state[editor_key] = None
             
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
@@ -5626,9 +5627,11 @@ with tab1:
                                 disabled=non_editable_cols + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=f"editor_{key}",
-                                on_change=empty_callback
+                                key=editor_key
                             )
+                            
+                            # Only process if button clicked, not on every edit
+                            # The button click will trigger the save logic
                             
                             btn_cols = st.columns([2, 2, 2, 1])
                             with btn_cols[0]:
@@ -6186,9 +6189,10 @@ with tab3:
                             
                             show_cols = ['Select'] + available_cols
                             
-                            # Use on_change with empty callback to prevent rerun on cell edit
-                            def empty_callback_op():
-                                pass  # Do nothing - prevent rerun
+                            # Store previous state to detect changes
+                            op_editor_key = f"op_editor_{key}"
+                            if op_editor_key not in st.session_state:
+                                st.session_state[op_editor_key] = None
             
                             edited_df = st.data_editor(
                                 display_df[show_cols + ['row_index']],
@@ -6196,9 +6200,11 @@ with tab3:
                                 disabled=[col for col in show_cols if col != 'Select'] + ['row_index'],
                                 hide_index=True,
                                 use_container_width=True,
-                                key=f"op_editor_{key}",
-                                on_change=empty_callback_op
+                                key=op_editor_key
                             )
+                            
+                            # Only process if button clicked, not on every edit
+                            # The button click will trigger the save logic
                             
                             selected = edited_df[edited_df['Select'] == True]
                             if len(selected) > 0:
