@@ -1043,7 +1043,27 @@ def send_unpaid_orders_report_email(orders_df, to_email):
     now = datetime.now(israel_tz)
     
     # Get app base URL for mark-as-paid links
-    app_url = os.environ.get('APP_BASE_URL', 'https://workspace-yehudatiktik.replit.app')
+    # Try to get from Streamlit secrets first, then environment, then default
+    app_url = None
+    try:
+        if hasattr(st, 'secrets') and 'APP_BASE_URL' in st.secrets:
+            app_url = st.secrets['APP_BASE_URL']
+    except:
+        pass
+    
+    if not app_url:
+        app_url = os.environ.get('APP_BASE_URL', None)
+    
+    if not app_url:
+        # Try to get from Streamlit config
+        try:
+            import streamlit as st_module
+            if hasattr(st_module, 'config') and hasattr(st_module.config, 'server'):
+                # For Streamlit Cloud, we can try to construct the URL
+                # But for now, use a default that works
+                app_url = 'https://workspace-yehudatiktik.replit.app'
+        except:
+            app_url = 'https://workspace-yehudatiktik.replit.app'
     
     # Calculate totals
     total_amount = 0
@@ -1099,16 +1119,60 @@ def send_unpaid_orders_report_email(orders_df, to_email):
         else:
             total_display = '-'
         
-        # Generate mark-as-paid token
+        # Generate mark-as-paid token and button
         mark_paid_button = ""
-        if row_index and (isinstance(row_index, int) or (isinstance(row_index, (str, float)) and str(row_index).strip().isdigit())):
+        
+        # Get row_index - try multiple ways
+        row_idx = None
+        if 'row_index' in order:
+            row_idx_val = order['row_index']
+            if pd.notna(row_idx_val):
+                try:
+                    row_idx = int(row_idx_val)
+                except:
+                    try:
+                        row_idx = int(float(row_idx_val))
+                    except:
+                        pass
+        
+        # If row_index is valid, create the button
+        if row_idx and row_idx > 1:  # row_index should be >= 2 (row 1 is header)
             try:
-                row_idx = int(row_index) if not isinstance(row_index, int) else row_index
-                secret = os.environ.get('SESSION_SECRET')
+                # Try to get SESSION_SECRET from environment or secrets
+                secret = None
+                try:
+                    secret = os.environ.get('SESSION_SECRET')
+                except:
+                    pass
+                
+                if not secret:
+                    try:
+                        if hasattr(st, 'secrets') and 'SESSION_SECRET' in st.secrets:
+                            secret = st.secrets['SESSION_SECRET']
+                    except:
+                        pass
+                
+                # Create URL with or without token
                 if secret and len(secret) >= 10:
+                    # With token (secure)
                     data = f"{order_num}:{row_idx}:{secret}"
                     token = hashlib.sha256(data.encode()).hexdigest()[:16]
                     mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}&token={token}"
+                else:
+                    # Without token (less secure, but works)
+                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
+                
+                mark_paid_button = f"""
+            <div style="margin-top: 15px; text-align: center;">
+                <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
+                    ✅ סמן כשולם (Done!)
+                </a>
+            </div>
+            """
+            except Exception as e:
+                # Even if there's an error, try to create a basic button
+                try:
+                    mark_paid_url = f"{app_url}?mark_paid={order_num}&row={row_idx}"
                     mark_paid_button = f"""
             <div style="margin-top: 15px; text-align: center;">
                 <a href="{mark_paid_url}" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; font-size: 14px;">
@@ -1116,8 +1180,8 @@ def send_unpaid_orders_report_email(orders_df, to_email):
                 </a>
             </div>
             """
-            except:
-                pass
+                except:
+                    pass
         
         email_body += f"""
         <div style="background: #fee2e2; padding: 15px; margin: 10px 0; border-radius: 8px; border-right: 4px solid #dc2626;">
@@ -3465,6 +3529,18 @@ with st.sidebar:
                 temp_df_for_email['orderd'].fillna('').str.strip().str.contains('נשלח ולא שולם', na=False)
             )
             unpaid_orders_for_email = temp_df_for_email[status_mask].copy()
+            
+            # Ensure row_index exists - it should already be there from load_data_from_sheet, but double-check
+            if 'row_index' not in unpaid_orders_for_email.columns and not unpaid_orders_for_email.empty:
+                # Re-add row_index if missing (shouldn't happen, but just in case)
+                unpaid_orders_for_email = unpaid_orders_for_email.copy()
+                # Use the original index from temp_df_for_email to calculate row_index
+                for idx, row in unpaid_orders_for_email.iterrows():
+                    if idx in temp_df_for_email.index:
+                        original_row_idx = temp_df_for_email.loc[idx, 'row_index'] if 'row_index' in temp_df_for_email.columns else idx + 2
+                        unpaid_orders_for_email.at[idx, 'row_index'] = original_row_idx
+                    else:
+                        unpaid_orders_for_email.at[idx, 'row_index'] = idx + 2
         
         unpaid_count = len(unpaid_orders_for_email)
         unpaid_tickets = int(pd.to_numeric(unpaid_orders_for_email.get('Qty', 0), errors='coerce').sum()) if not unpaid_orders_for_email.empty else 0
