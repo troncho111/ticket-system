@@ -1109,165 +1109,173 @@ elif selected_tab == "➕ הוספה ידנית":
     
     st.markdown("---")
     
-    col_form1, col_form2 = st.columns(2)
-    
-    with col_form1:
-        st.markdown("### 📋 פרטי הזמנה")
+    # Wrap all input fields in a form to prevent rerun on input change
+    with st.form(key="agents_manual_order_form", clear_on_submit=False):
+        col_form1, col_form2 = st.columns(2)
         
-        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        order_date = st.text_input(
-            "📅 תאריך הזמנה:",
-            value=current_datetime,
-            disabled=True,
-            key="manual_order_date"
-        )
-        
-        status_options = ["new", "נשלח ולא שולם"]
-        selected_status = st.selectbox(
-            "📊 סטטוס:",
-            status_options,
-            index=0,
-            key="manual_status"
-        )
-        
-        existing_sources = get_unique_sources(df)
-        source_mode = st.radio(
-            "🏷️ מקור:",
-            ["בחר מקור קיים", "הזנה ידנית"],
-            horizontal=True,
-            key="source_mode"
-        )
-        
-        if source_mode == "בחר מקור קיים":
-            source_option = st.selectbox(
-                "בחר מקור:",
-                ["-- בחר --"] + existing_sources,
-                key="manual_source_select"
+        with col_form1:
+            st.markdown("### 📋 פרטי הזמנה")
+            
+            current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            order_date = st.text_input(
+                "📅 תאריך הזמנה:",
+                value=current_datetime,
+                disabled=True,
+                key="manual_order_date"
             )
-            final_source = "" if source_option == "-- בחר --" else source_option
-        else:
-            final_source = st.text_input(
-                "הזן מקור:",
-                placeholder="לדוגמה: WhatsApp, Telegram",
-                key="manual_new_source"
+            
+            status_options = ["new", "נשלח ולא שולם"]
+            selected_status = st.selectbox(
+                "📊 סטטוס:",
+                status_options,
+                index=0,
+                key="manual_status"
             )
-        
-        auto_order_num = generate_order_number(df)
-        order_number = st.text_input(
-            "🔢 מספר הזמנה:",
-            value=auto_order_num,
-            key="manual_order_number"
-        )
-        
-        docket_number = st.text_input(
-            "📄 מספר דוקט:",
-            placeholder="הזן מספר דוקט",
-            key="manual_docket"
-        )
-    
-    with col_form2:
-        st.markdown("### 🎫 פרטי אירוע")
-        
-        events_dict = get_unique_events(df)
-        event_options = ["-- בחר אירוע קיים --"] + list(events_dict.keys()) + ["➕ הזן אירוע חדש"]
-        selected_event = st.selectbox(
-            "🎭 שם אירוע:",
-            event_options,
-            key="manual_event_select"
-        )
-        
-        if selected_event == "➕ הזן אירוע חדש":
-            event_name = st.text_input(
-                "הזן שם אירוע:",
-                placeholder="לדוגמה: Real Madrid vs Barcelona",
-                key="manual_new_event"
+            
+            existing_sources = get_unique_sources(df)
+            source_mode = st.radio(
+                "🏷️ מקור:",
+                ["בחר מקור קיים", "הזנה ידנית"],
+                horizontal=True,
+                key="source_mode"
             )
-            event_date = st.text_input(
-                "📅 תאריך אירוע:",
-                placeholder="DD/MM/YYYY",
-                key="manual_event_date"
-            )
-        elif selected_event == "-- בחר אירוע קיים --":
-            event_name = ""
-            event_date = ""
-        else:
-            event_name = selected_event
-            event_date = events_dict.get(selected_event, "")
-            st.info(f"📅 תאריך אירוע: {event_date}" if event_date else "📅 תאריך אירוע: לא נמצא")
-        
-        category_options = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "VIP", "PREMIUM", "LONGSIDE", "TIER 1", "TIER 2"]
-        category_mode = st.radio(
-            "🏟️ קטגוריה / סקציה:",
-            ["בחר קטגוריה", "הזנה ידנית"],
-            horizontal=True,
-            key="category_mode"
-        )
-        
-        if category_mode == "בחר קטגוריה":
-            category = st.selectbox(
-                "בחר קטגוריה:",
-                ["-- בחר --"] + category_options,
-                key="manual_category_select"
-            )
-            if category == "-- בחר --":
-                category = ""
-        else:
-            category = st.text_input(
-                "הזן קטגוריה:",
-                placeholder="לדוגמה: CAT 1, VIP, LONGSIDE",
-                key="manual_category"
-            )
-        
-        quantity = st.number_input(
-            "🔢 כמות כרטיסים:",
-            min_value=1,
-            value=1,
-            step=1,
-            key="manual_quantity"
-        )
-    
-    st.markdown("---")
-    st.markdown("### 💰 פרטי מחיר")
-    
-    price_cols = st.columns([2, 1, 2])
-    
-    with price_cols[0]:
-        price_per_ticket = st.number_input(
-            "💶 מחיר לכרטיס:",
-            min_value=0.0,
-            value=0.0,
-            step=0.01,
-            format="%.2f",
-            key="manual_price"
-        )
-    
-    with price_cols[1]:
-        currency = st.selectbox(
-            "מטבע:",
-            ["€", "£", "$"],
-            index=0,
-            key="manual_currency"
-        )
-    
-    with price_cols[2]:
-        total = quantity * price_per_ticket
-        st.markdown(f"### סה\"כ: {currency}{total:.2f}")
-        st.caption(f"({quantity} × {currency}{price_per_ticket:.2f})")
-    
-    st.markdown("---")
-    
-    col_submit, col_clear = st.columns([1, 1])
-    
-    with col_submit:
-        if st.button("✅ הוסף הזמנה", key="submit_manual_order", type="primary", use_container_width=True):
-            if not event_name:
-                st.error("❌ יש לבחור או להזין שם אירוע")
-            elif not final_source:
-                st.error("❌ יש לבחור או להזין מקור")
-            elif price_per_ticket <= 0:
-                st.error("❌ יש להזין מחיר לכרטיס")
+            
+            if source_mode == "בחר מקור קיים":
+                source_option = st.selectbox(
+                    "בחר מקור:",
+                    ["-- בחר --"] + existing_sources,
+                    key="manual_source_select"
+                )
+                final_source = "" if source_option == "-- בחר --" else source_option
             else:
-                order_data = {
+                final_source = st.text_input(
+                    "הזן מקור:",
+                    placeholder="לדוגמה: WhatsApp, Telegram",
+                    key="manual_new_source"
+                )
+            
+            auto_order_num = generate_order_number(df)
+            order_number = st.text_input(
+                "🔢 מספר הזמנה:",
+                value=auto_order_num,
+                key="manual_order_number"
+            )
+            
+            docket_number = st.text_input(
+                "📄 מספר דוקט:",
+                placeholder="הזן מספר דוקט",
+                key="manual_docket"
+            )
+        
+        with col_form2:
+            st.markdown("### 🎫 פרטי אירוע")
+            
+            events_dict = get_unique_events(df)
+            event_options = ["-- בחר אירוע קיים --"] + list(events_dict.keys()) + ["➕ הזן אירוע חדש"]
+            selected_event = st.selectbox(
+                "🎭 שם אירוע:",
+                event_options,
+                key="manual_event_select"
+            )
+            
+            if selected_event == "➕ הזן אירוע חדש":
+                event_name = st.text_input(
+                    "הזן שם אירוע:",
+                    placeholder="לדוגמה: Real Madrid vs Barcelona",
+                    key="manual_new_event"
+                )
+                event_date = st.text_input(
+                    "📅 תאריך אירוע:",
+                    placeholder="DD/MM/YYYY",
+                    key="manual_event_date"
+                )
+            elif selected_event == "-- בחר אירוע קיים --":
+                event_name = ""
+                event_date = ""
+            else:
+                event_name = selected_event
+                event_date = events_dict.get(selected_event, "")
+                st.info(f"📅 תאריך אירוע: {event_date}" if event_date else "📅 תאריך אירוע: לא נמצא")
+            
+            category_options = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "VIP", "PREMIUM", "LONGSIDE", "TIER 1", "TIER 2"]
+            category_mode = st.radio(
+                "🏟️ קטגוריה / סקציה:",
+                ["בחר קטגוריה", "הזנה ידנית"],
+                horizontal=True,
+                key="category_mode"
+            )
+            
+            if category_mode == "בחר קטגוריה":
+                category = st.selectbox(
+                    "בחר קטגוריה:",
+                    ["-- בחר --"] + category_options,
+                    key="manual_category_select"
+                )
+                if category == "-- בחר --":
+                    category = ""
+            else:
+                category = st.text_input(
+                    "הזן קטגוריה:",
+                    placeholder="לדוגמה: CAT 1, VIP, LONGSIDE",
+                    key="manual_category"
+                )
+            
+            quantity = st.number_input(
+                "🔢 כמות כרטיסים:",
+                min_value=1,
+                value=1,
+                step=1,
+                key="manual_quantity"
+            )
+        
+        st.markdown("---")
+        st.markdown("### 💰 פרטי מחיר")
+        
+        price_cols = st.columns([2, 1, 2])
+        
+        with price_cols[0]:
+            price_per_ticket = st.number_input(
+                "💶 מחיר לכרטיס:",
+                min_value=0.0,
+                value=0.0,
+                step=0.01,
+                format="%.2f",
+                key="manual_price"
+            )
+        
+        with price_cols[1]:
+            currency = st.selectbox(
+                "מטבע:",
+                ["€", "£", "$"],
+                index=0,
+                key="manual_currency"
+            )
+        
+        with price_cols[2]:
+            total = quantity * price_per_ticket
+            st.markdown(f"### סה\"כ: {currency}{total:.2f}")
+            st.caption(f"({quantity} × {currency}{price_per_ticket:.2f})")
+        
+        st.markdown("---")
+        
+        col_submit, col_clear = st.columns([1, 1])
+        
+        with col_submit:
+            submitted = st.form_submit_button("✅ הוסף הזמנה", type="primary", use_container_width=True)
+        
+        with col_clear:
+            clear_clicked = st.form_submit_button("🗑️ נקה טופס", use_container_width=True)
+    
+    # Handle form submission
+    if submitted:
+        if not event_name:
+            st.error("❌ יש לבחור או להזין שם אירוע")
+        elif not final_source:
+            st.error("❌ יש לבחור או להזין מקור")
+        elif price_per_ticket <= 0:
+            st.error("❌ יש להזין מחיר לכרטיס")
+        else:
+            order_data = {
                     'order date': current_datetime,
                     'orderd': selected_status,
                     'source': final_source,
@@ -1299,9 +1307,9 @@ elif selected_tab == "➕ הוספה ידנית":
                     else:
                         st.error(f"❌ {message}")
     
-    with col_clear:
-        if st.button("🗑️ נקה טופס", key="clear_manual_form", use_container_width=True):
-            st.rerun()
+    # Handle clear button
+    if clear_clicked:
+        st.rerun()
     
     st.markdown("---")
     st.info("""

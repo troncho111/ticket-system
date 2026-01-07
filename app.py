@@ -4519,20 +4519,17 @@ if st.session_state.get('show_manual_order_form', False):
 סטטוס: {add_status}"""
             st.code(order_summary, language="text")
         
-        st.markdown("---")
-        btn_col1, btn_col2, btn_col3 = st.columns([2, 1, 1])
-        
-        with btn_col1:
-            if st.button("✅ הוסף הזמנה", key="main_add_order", type="primary", use_container_width=True):
-                submit_datetime = datetime.now().strftime("%d/%m/%Y %H:%M")
-                if not add_event_name:
-                    st.error("❌ בחר או הזן אירוע")
-                elif not add_final_source:
-                    st.error("❌ בחר או הזן מקור")
-                elif add_price <= 0:
-                    st.error("❌ הזן מחיר")
-                else:
-                    order_data = {
+        # Handle form submission
+        if submitted:
+            submit_datetime = datetime.now().strftime("%d/%m/%Y %H:%M")
+            if not add_event_name:
+                st.error("❌ בחר או הזן אירוע")
+            elif not add_final_source:
+                st.error("❌ בחר או הזן מקור")
+            elif add_price <= 0:
+                st.error("❌ הזן מחיר")
+            else:
+                order_data = {
                         'order date': submit_datetime,
                         'orderd': add_status,
                         'source': add_final_source,
