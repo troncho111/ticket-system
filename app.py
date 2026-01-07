@@ -1386,59 +1386,70 @@ def get_gspread_client():
             private_key = creds_dict['private_key']
             original_key = private_key  # Keep original for debugging
             
-            # Handle escaped newlines - this is the most common issue
-            # The private_key in JSON is often stored with escaped newlines (\n as string)
-            # We need to convert them to actual newline characters
-            
-            # Method 1: Simple replace of \\n with \n
-            # This handles the case where JSON has "\\n" as a string
+            # Step 1: Handle escaped newlines - convert \n (two characters: backslash + n) to actual newline
+            # This is critical - JSON strings have "\\n" which needs to become actual "\n"
             if '\\n' in private_key:
-                # Count how many backslashes before 'n'
-                # If it's \\n (two backslashes + n), replace with actual newline
-                # If it's \n (one backslash + n), it's already escaped, replace with newline
+                # Replace escaped newlines with actual newlines
+                # This handles: "-----BEGIN PRIVATE KEY-----\\nMII..." -> "-----BEGIN PRIVATE KEY-----\nMII..."
                 private_key = private_key.replace('\\n', '\n')
             
-            # Method 2: Handle double-escaped (\\\\n becomes \n)
-            import re
-            # Replace any number of backslashes followed by 'n' with actual newline
-            # But be careful - we already did the simple replace above
-            # So now we only need to handle cases with more backslashes
-            private_key = re.sub(r'\\{2,}n', '\n', private_key)
+            # Step 2: Handle case where newlines might have been converted to spaces
+            # Sometimes when loading from Streamlit Secrets, newlines become spaces
+            # Check if BEGIN is followed by space instead of newline
+            if '-----BEGIN PRIVATE KEY----- ' in private_key:
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
             
-            # Ensure the key has proper BEGIN/END markers
+            # Step 3: Ensure proper format - the key should have newlines
+            # Verify BEGIN and END markers exist
             if '-----BEGIN PRIVATE KEY-----' not in private_key:
-                # Check if it has the markers but maybe with different spacing
-                if 'BEGIN PRIVATE KEY' in private_key:
-                    # Try to reconstruct with proper format
-                    begin_marker = '-----BEGIN PRIVATE KEY-----'
-                    end_marker = '-----END PRIVATE KEY-----'
-                    
-                    # Extract the key content (between markers if they exist)
-                    if '-----END' in private_key:
-                        # Has end marker, extract content
-                        parts = private_key.split('-----END')
-                        key_content = parts[0].replace('BEGIN PRIVATE KEY', '').replace('-----', '').strip()
-                        private_key = f'{begin_marker}\n{key_content}\n{end_marker}'
-                    else:
-                        # No end marker, assume the whole thing is the key
-                        key_content = private_key.replace('BEGIN PRIVATE KEY', '').replace('-----', '').strip()
-                        private_key = f'{begin_marker}\n{key_content}\n{end_marker}'
-            
-            # Final validation - ensure it has BEGIN and END markers
-            if '-----BEGIN' not in private_key or '-----END' not in private_key:
                 raise ValueError(
-                    "private_key לא בפורמט תקין.\n"
-                    "המפתח צריך להתחיל ב-'-----BEGIN PRIVATE KEY-----' ולהסתיים ב-'-----END PRIVATE KEY-----'.\n"
-                    "ודא שה-private_key ב-JSON כולל newlines אמיתיים (\\n) ולא escaped (\\\\n).\n"
-                    f"אורך המפתח המקורי: {len(original_key)} תווים\n"
-                    f"המפתח מתחיל ב: {original_key[:50] if len(original_key) > 50 else original_key}..."
+                    "private_key לא מכיל '-----BEGIN PRIVATE KEY-----'.\n"
+                    f"המפתח מתחיל ב: {private_key[:100] if len(private_key) > 100 else private_key}..."
                 )
             
-            # Additional check: ensure the key looks valid
+            if '-----END PRIVATE KEY-----' not in private_key:
+                raise ValueError(
+                    "private_key לא מכיל '-----END PRIVATE KEY-----'.\n"
+                    f"המפתח מסתיים ב: ...{private_key[-100:] if len(private_key) > 100 else private_key}"
+                )
+            
+            # Step 4: Ensure there are actual newlines in the key
+            # The key MUST have newlines - if not, try to fix it
+            if '\n' not in private_key:
+                # Try to reconstruct with newlines
+                # Split by BEGIN and END markers
+                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
+                end_idx = private_key.find('-----END PRIVATE KEY-----')
+                
+                if begin_idx >= 0 and end_idx > begin_idx:
+                    begin_marker = '-----BEGIN PRIVATE KEY-----'
+                    end_marker = '-----END PRIVATE KEY-----'
+                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
+                    # Remove any spaces and reconstruct with newlines every 64 chars (standard PEM format)
+                    key_content = key_content.replace(' ', '')
+                    # Reconstruct with newlines every 64 characters
+                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
+                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
+                else:
+                    raise ValueError(
+                        "private_key לא מכיל newlines אמיתיים ולא ניתן לתקן אוטומטית.\n"
+                        "ודא שה-private_key ב-JSON כולל \\n (escaped newlines)."
+                    )
+            
+            # Step 5: Additional validation
             if len(private_key) < 100:
                 raise ValueError(
                     "private_key נראה קצר מדי - ודא שהעתקת את כל המפתח מה-JSON file."
                 )
+            
+            # Step 6: Final format check - ensure newlines are present after BEGIN and before END
+            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
+                # Try to fix if missing newline after BEGIN
+                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
+            
+            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
+                # Try to fix if missing newline before END
+                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
             
             creds_dict['private_key'] = private_key
         
@@ -1454,7 +1465,25 @@ def get_gspread_client():
         raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
     
     try:
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        # Create a copy to avoid modifying the original
+        creds_dict_copy = creds_dict.copy()
+        
+        # Final validation of private_key before passing to oauth2client
+        if 'private_key' in creds_dict_copy:
+            pk = creds_dict_copy['private_key']
+            # Ensure it's a string and has proper format
+            if not isinstance(pk, str):
+                raise ValueError(f"private_key צריך להיות string, אבל קיבלנו: {type(pk)}")
+            
+            # Verify it has BEGIN and END markers
+            if '-----BEGIN PRIVATE KEY-----' not in pk or '-----END PRIVATE KEY-----' not in pk:
+                raise ValueError("private_key לא בפורמט PEM תקין - חסרים BEGIN/END markers")
+            
+            # Verify it has newlines
+            if '\n' not in pk:
+                raise ValueError("private_key לא מכיל newlines - זה נדרש לפורמט PEM")
+        
+        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict_copy, scope)
         client = gspread.authorize(credentials)
         return client
     except Exception as e:
