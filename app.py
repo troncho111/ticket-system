@@ -6340,21 +6340,21 @@ with tab4:
                     
                     with st.container(border=True):
                         if is_ordered:
-                        st.markdown("""
-                        <style>
-                        div[data-testid="stVerticalBlockBorderWrapper"]:has(h3:contains("הזמנה")) {
-                            background-color: rgba(56, 189, 248, 0.15) !important;
-                        }
-                        </style>
-                        <div style="background-color: rgba(56, 189, 248, 0.15); margin: -1rem; padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem;">
-                        <h4 style="margin:0; color: #0284c7;">🎫 הזמנה #""" + str(order_num) + """ ✓ הוזמן</h4>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
-                    else:
-                        st.markdown(f"### 🎫 הזמנה #{order_num}")
-                        st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
-                    
+                            st.markdown("""
+                            <style>
+                            div[data-testid="stVerticalBlockBorderWrapper"]:has(h3:contains("הזמנה")) {
+                                background-color: rgba(56, 189, 248, 0.15) !important;
+                            }
+                            </style>
+                            <div style="background-color: rgba(56, 189, 248, 0.15); margin: -1rem; padding: 1rem; border-radius: 8px; margin-bottom: 0.5rem;">
+                            <h4 style="margin:0; color: #0284c7;">🎫 הזמנה #""" + str(order_num) + """ ✓ הוזמן</h4>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
+                        else:
+                            st.markdown(f"### 🎫 הזמנה #{order_num}")
+                            st.markdown(f"**{event_name}** | 📅 אירוע: {event_date} | 🛒 הזמנה: {order_date} | 🎫 {qty} כרטיסים | €{total} | 📍 {source} | 📁 {category}")
+                        
                         # Use form to prevent rerun on input change - only update on button click
                         with st.form(key=f"order_form_{idx}_{order_num}", clear_on_submit=False):
                             col1, col2, col3, col4, col5 = st.columns([2, 2, 1, 1, 1])
@@ -6432,12 +6432,12 @@ with tab4:
                                     st.session_state.tab4_needs_refresh = True
                                     time.sleep(0.5)
                                     st.rerun()
+                                    else:
+                                        st.info("אין שינויים לשמור")
+                                except Exception as e:
+                                    st.error(f"שגיאה: {str(e)}")
                                 else:
-                                    st.info("אין שינויים לשמור")
-                            except Exception as e:
-                                st.error(f"שגיאה: {str(e)}")
-                        else:
-                            st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
+                                    st.warning("לא נמצא מספר שורה - לא ניתן לעדכן")
                         
                         # Handle delete button click INSIDE form to prevent rerun
                         if delete_clicked:
