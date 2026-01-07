@@ -2361,6 +2361,7 @@ def has_supplier_data(row):
                 break
     return supp_price > 0 or supp_name != '' or supp_order != ''
 
+@st.cache_data(ttl=3600)
 def get_category_color(category):
     """החזר אימוג'י צבעוני בהתאם לקטגוריה"""
     if not category or pd.isna(category):
@@ -2636,6 +2637,7 @@ def delete_order_row(row_index):
         st.error(f"שגיאה במחיקת ההזמנה: {str(e)}")
         return False
 
+@st.cache_data(ttl=3600)
 def parse_supp_price(price_str):
     """Parse SUPP PRICE and return numeric value or 0 if invalid."""
     if not price_str:
@@ -2651,6 +2653,7 @@ def parse_supp_price(price_str):
     except:
         return 0
 
+@st.cache_data(ttl=300, hash_funcs={pd.DataFrame: lambda x: hash(str(x.columns.tolist()))})
 def find_column_flexible(df, keywords):
     """Find column by keywords, ignoring case and extra spaces."""
     keywords_lower = [k.lower() for k in keywords]
@@ -2661,6 +2664,7 @@ def find_column_flexible(df, keywords):
             return col
     return None
 
+@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: lambda x: hash(str(x.values.tobytes()) + str(x.columns.tolist()))})
 def get_rows_for_orderd(df):
     import pytz
     israel_tz = pytz.timezone('Asia/Jerusalem')
@@ -2723,6 +2727,7 @@ def get_rows_for_orderd(df):
     
     return rows_to_update, updated_orders_info
 
+@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: lambda x: hash(str(x.values.tobytes()) + str(x.columns.tolist()))})
 def get_rows_for_done(df):
     import pytz
     israel_tz = pytz.timezone('Asia/Jerusalem')
@@ -2785,6 +2790,7 @@ def get_rows_for_done(df):
     
     return rows_to_update, updated_orders_info
 
+@st.cache_data(ttl=60, hash_funcs={pd.DataFrame: lambda x: hash(str(x.values.tobytes()) + str(x.columns.tolist()))})
 def get_rows_for_old_no_data(df):
     """מוצא הזמנות ישנות (עבר) ללא נתוני ספק"""
     import pytz
@@ -2894,6 +2900,7 @@ def setup_status_dropdown():
         st.error(f"Error setting up dropdown: {str(e)}")
         return False
 
+@st.cache_data(ttl=3600)
 def get_status_color(status):
     """Return color based on status."""
     if status is None:
