@@ -6319,18 +6319,12 @@ with tab4:
             
             st.markdown("---")
             
-            # CRITICAL: The problem is that Streamlit ALWAYS reruns when typing, even in forms
-            # The loop creates 196 forms, and each rerun recreates all 196 forms = SLOW
-            # Solution: Use pagination or limit visible items to reduce the number of forms created
-            # For now, show only first 50 orders to improve performance
-            MAX_ORDERS_TO_SHOW = 50
-            orders_to_display = all_new_orders.head(MAX_ORDERS_TO_SHOW)
-            
-            if len(all_new_orders) > MAX_ORDERS_TO_SHOW:
-                st.info(f"מציג {MAX_ORDERS_TO_SHOW} מתוך {len(all_new_orders)} הזמנות. השתמש בפילטרים כדי לצמצם את הרשימה.")
-            
-            for idx, (_, order) in enumerate(orders_to_display.iterrows()):
-                order_num = order.get('Order number', '-')
+            # Use st.fragment to prevent full app rerun when typing in forms
+            # This is the REAL solution - fragments rerun independently
+            @st.fragment
+            def render_order_forms(orders_df):
+                for idx, (_, order) in enumerate(orders_df.iterrows()):
+                    order_num = order.get('Order number', '-')
                 event_name = str(order.get('event name', '-'))[:50]
                 event_date = order.get('Date of the event', '-')
                 order_date = order.get('order date', '-')
@@ -6467,6 +6461,10 @@ with tab4:
                                     st.rerun()
                             else:
                                 st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
+            
+            # Call the fragment function to render all forms
+            # This prevents full app rerun when typing in form inputs
+            render_order_forms(all_new_orders)
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:
