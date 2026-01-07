@@ -888,7 +888,75 @@ elif selected_tab == "📦 ניהול ספקים":
             original_dockets = edit_df[DOCKET_COL].copy() if DOCKET_COL and DOCKET_COL in edit_df.columns else None
             original_rows = edit_df['row_index'].copy() if 'row_index' in edit_df.columns else None
             
+            # Initialize selected rows in session state
+            if 'selected_rows_batch' not in st.session_state:
+                st.session_state.selected_rows_batch = set()
+            
+            # Add checkbox column for batch selection
+            edit_df_with_selection = edit_df.copy()
+            edit_df_with_selection['בחר'] = False
+            
+            # Restore previous selections
+            if st.session_state.selected_rows_batch:
+                for idx in st.session_state.selected_rows_batch:
+                    if idx < len(edit_df_with_selection):
+                        edit_df_with_selection.iloc[idx, edit_df_with_selection.columns.get_loc('בחר')] = True
+            
             st.markdown(f"### 📝 לחץ על תא דוקט לעריכה ({len(edit_df)} שורות)")
+            
+            # Batch selection controls
+            batch_cols = st.columns([1, 1, 1, 2, 1])
+            with batch_cols[0]:
+                if st.button("✅ בחר הכל", key="select_all_batch"):
+                    st.session_state.selected_rows_batch = set(range(len(edit_df)))
+                    st.rerun()
+            with batch_cols[1]:
+                if st.button("❌ בטל הכל", key="deselect_all_batch"):
+                    st.session_state.selected_rows_batch = set()
+                    st.rerun()
+            with batch_cols[2]:
+                selected_count = len(st.session_state.selected_rows_batch)
+                st.info(f"📊 נבחרו: **{selected_count}** שורות")
+            with batch_cols[3]:
+                batch_docket = st.text_input(
+                    "🔢 עדכן דוקט לכל הנבחרים:",
+                    placeholder="הזן מספר דוקט לעדכון מרובה",
+                    key="batch_docket_input"
+                )
+            with batch_cols[4]:
+                if st.button("💾 עדכן נבחרים", key="update_batch_docket", type="primary", disabled=selected_count == 0 or not batch_docket):
+                    if batch_docket and batch_docket.strip() and selected_count > 0:
+                        with st.spinner(f"מעדכן {selected_count} שורות..."):
+                            success_count = 0
+                            errors = []
+                            for idx in st.session_state.selected_rows_batch:
+                                if idx < len(original_rows):
+                                    row_idx = int(original_rows.iloc[idx]) if pd.notna(original_rows.iloc[idx]) else None
+                                    if row_idx:
+                                        success, msg = update_docket_number(row_idx, batch_docket.strip())
+                                        if success:
+                                            success_count += 1
+                                        else:
+                                            errors.append(f"שורה {row_idx}: {msg}")
+                            
+                            if success_count > 0:
+                                load_data_from_sheet.clear()
+                                st.session_state.selected_rows_batch = set()  # Clear selection after update
+                                st.success(f"✅ עודכנו {success_count} שורות עם דוקט: {batch_docket}")
+                                st.balloons()
+                                if errors:
+                                    for err in errors[:5]:  # Show first 5 errors
+                                        st.warning(err)
+                                st.rerun()
+                            elif errors:
+                                for err in errors:
+                                    st.error(err)
+                    elif not batch_docket or not batch_docket.strip():
+                        st.warning("יש להזין מספר דוקט")
+                    else:
+                        st.warning("לא נבחרו שורות לעדכון")
+            
+            st.markdown("---")
             
             st.markdown(
                 """
@@ -934,6 +1002,7 @@ elif selected_tab == "📦 ניהול ספקים":
             )
             
             column_config = {
+                'בחר': st.column_config.CheckboxColumn('בחר', default=False),
                 'row_index': st.column_config.NumberColumn('שורה', disabled=True),
                 'order date': st.column_config.TextColumn('תאריך הזמנה', disabled=True),
                 'orderd': st.column_config.TextColumn('סטטוס', disabled=True),
@@ -947,8 +1016,12 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
+            # Reorder columns to put 'בחר' first
+            cols_order = ['בחר'] + [col for col in edit_df_with_selection.columns if col != 'בחר']
+            edit_df_with_selection = edit_df_with_selection[cols_order]
+            
             edited_df = st.data_editor(
-                edit_df,
+                edit_df_with_selection,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
@@ -956,6 +1029,14 @@ elif selected_tab == "📦 ניהול ספקים":
                 hide_index=True,
                 key="docket_editor"
             )
+            
+            # Update selected rows based on checkbox column
+            if 'בחר' in edited_df.columns:
+                selected_indices = edited_df[edited_df['בחר'] == True].index.tolist()
+                st.session_state.selected_rows_batch = set(selected_indices)
+            
+            # Remove 'בחר' column from edited_df for further processing
+            edited_df = edited_df.drop(columns=['בחר'], errors='ignore')
             
             col_save, col_info = st.columns([1, 3])
             with col_save:
