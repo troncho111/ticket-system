@@ -888,6 +888,15 @@ elif selected_tab == "📦 ניהול ספקים":
             # Make sure edit_df is a fresh copy
             edit_df_for_editor = edit_df.copy()
             
+            # Clear any corrupted session_state entries that might cause issues
+            # Remove any old keys that might conflict
+            keys_to_remove = [k for k in st.session_state.keys() if 'docket_editor' in str(k) or 'edit_df_with' in str(k)]
+            for key in keys_to_remove:
+                try:
+                    del st.session_state[key]
+                except:
+                    pass
+            
             # Ensure the DataFrame is not empty
             if edit_df_for_editor.empty:
                 st.warning("אין נתונים לעריכה")
