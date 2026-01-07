@@ -885,19 +885,32 @@ elif selected_tab == "📦 ניהול ספקים":
             }
             
             # st.data_editor automatically manages session_state with the key
-            # Use a fixed key - Streamlit will handle the state automatically
             # Make sure edit_df is a fresh copy to avoid any state conflicts
             edit_df_for_editor = edit_df.copy()
             
-            edited_df = st.data_editor(
-                edit_df_for_editor,
-                column_config=column_config,
-                use_container_width=True,
-                height=450,
-                num_rows="fixed",
-                hide_index=True,
-                key="docket_editor"
-            )
+            # Try without key first - if that doesn't work, use a unique key per filter state
+            # The issue is that Streamlit doesn't allow manual session_state management for data_editor
+            try:
+                edited_df = st.data_editor(
+                    edit_df_for_editor,
+                    column_config=column_config,
+                    use_container_width=True,
+                    height=450,
+                    num_rows="fixed",
+                    hide_index=True
+                )
+            except:
+                # If no key fails, use a key based on filter state
+                filter_state_key = f"docket_editor_{filter_token}_{len(edit_df)}"
+                edited_df = st.data_editor(
+                    edit_df_for_editor,
+                    column_config=column_config,
+                    use_container_width=True,
+                    height=450,
+                    num_rows="fixed",
+                    hide_index=True,
+                    key=filter_state_key
+                )
             
             col_save, col_info = st.columns([1, 3])
             with col_save:
