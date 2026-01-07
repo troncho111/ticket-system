@@ -47,84 +47,21 @@ SHEET_NAME = "מערכת הזמנות - קוד יהודה  "
 WORKSHEET_INDEX = 0
 
 def get_gspread_client():
-    """Create and return a gspread client using credentials from environment."""
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    
-    # Try to get from Streamlit secrets first (if available)
-    creds_json = None
-    try:
-        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
-            creds_json = st.secrets['GOOGLE_CREDENTIALS']
-    except:
-        pass
-    
-    # Fallback to environment variable
+    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
     if not creds_json:
-        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment")
     
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
-    
-    # Handle different input formats
-    try:
-        if isinstance(creds_json, dict):
-            creds_dict = creds_json
-        elif isinstance(creds_json, str):
-            creds_dict = json.loads(creds_json)
-        else:
-            creds_dict = dict(creds_json)
-        
-        # Ensure private_key is properly formatted (handle escaped newlines)
-        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
-            private_key = creds_dict['private_key']
-            import re
-            private_key = re.sub(r'\\{2,}n', '\n', private_key)
-            if '\\n' in private_key:
-                private_key = private_key.replace('\\n', '\n')
-            if '-----BEGIN PRIVATE KEY----- ' in private_key:
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY----- ', '-----BEGIN PRIVATE KEY-----\n')
-            
-            if '-----BEGIN PRIVATE KEY-----' not in private_key or '-----END PRIVATE KEY-----' not in private_key:
-                raise ValueError("private_key לא תקין - חסרים BEGIN/END markers")
-            
-            if '\n' not in private_key:
-                begin_idx = private_key.find('-----BEGIN PRIVATE KEY-----')
-                end_idx = private_key.find('-----END PRIVATE KEY-----')
-                if begin_idx >= 0 and end_idx > begin_idx:
-                    begin_marker = '-----BEGIN PRIVATE KEY-----'
-                    end_marker = '-----END PRIVATE KEY-----'
-                    key_content = private_key[begin_idx + len(begin_marker):end_idx].strip()
-                    key_content = key_content.replace(' ', '')
-                    key_lines = [key_content[i:i+64] for i in range(0, len(key_content), 64)]
-                    private_key = f'{begin_marker}\n' + '\n'.join(key_lines) + f'\n{end_marker}\n'
-            
-            if not private_key.startswith('-----BEGIN PRIVATE KEY-----\n'):
-                private_key = private_key.replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n', 1)
-            if not private_key.rstrip().endswith('\n-----END PRIVATE KEY-----'):
-                private_key = private_key.replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----', 1)
-            
-            creds_dict['private_key'] = private_key
-        
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
-    except Exception as e:
-        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
-    
-    required_fields = ['type', 'project_id', 'private_key', 'client_email']
-    missing_fields = [f for f in required_fields if f not in creds_dict]
-    if missing_fields:
-        raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
-    
-    try:
-        credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(credentials)
-        return client
-    except Exception as e:
-        raise ValueError(f"Error creating gspread client: {str(e)}")
+    if isinstance(creds_json, str):
+        creds_dict = json.loads(creds_json)
+    else:
+        creds_dict = dict(creds_json)
+    credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(credentials)
 
 def find_column(df, *keywords):
     """Find column containing all keywords (case-insensitive)"""
@@ -328,36 +265,32 @@ def show_order_details(row, docket_col, unique_key=""):
     
     st.markdown("### ✏️ עדכון מספר דוקט")
     
-    # Use form to prevent rerun on input change - only update on button click
-    with st.form(key=f"docket_form_{unique_key}_{order_num}", clear_on_submit=False):
-        col_input, col_btn = st.columns([3, 1])
-        with col_input:
-            new_docket = st.text_input(
-                "מספר דוקט חדש:",
-                value="" if docket_is_empty else "",
-                placeholder=f"נוכחי: {docket}" if not docket_is_empty else "הזן מספר דוקט",
-                key=f"docket_input_{unique_key}_{order_num}"
-            )
-        
-        with col_btn:
-            st.markdown("<br>", unsafe_allow_html=True)
-            update_clicked = st.form_submit_button("✅ עדכן", type="primary", use_container_width=True)
+    col_input, col_btn = st.columns([3, 1])
+    with col_input:
+        new_docket = st.text_input(
+            "מספר דוקט חדש:",
+            value="" if docket_is_empty else "",
+            placeholder=f"נוכחי: {docket}" if not docket_is_empty else "הזן מספר דוקט",
+            key=f"docket_input_{unique_key}_{order_num}"
+        )
     
-    if update_clicked:
-        if new_docket and new_docket.strip() and row_idx:
-            with st.spinner("מעדכן בגוגל שיטס..."):
-                success, message = update_docket_number(row_idx, new_docket.strip())
-                if success:
-                    load_data_from_sheet.clear()
-                    st.success(f"✅ {message}")
-                    st.balloons()
-                    st.info(f"דוקט עודכן: `{docket}` ➜ `{new_docket}` להזמנה {order_num}")
-                else:
-                    st.error(f"❌ {message}")
-        elif not new_docket or not new_docket.strip():
-            st.warning("יש להזין מספר דוקט חדש")
-        else:
-            st.error("לא נמצא מספר שורה לעדכון")
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("✅ עדכן", key=f"update_btn_{unique_key}_{order_num}", type="primary"):
+            if new_docket and new_docket.strip() and row_idx:
+                with st.spinner("מעדכן בגוגל שיטס..."):
+                    success, message = update_docket_number(row_idx, new_docket.strip())
+                    if success:
+                        load_data_from_sheet.clear()
+                        st.success(f"✅ {message}")
+                        st.balloons()
+                        st.info(f"דוקט עודכן: `{docket}` ➜ `{new_docket}` להזמנה {order_num}")
+                    else:
+                        st.error(f"❌ {message}")
+            elif not new_docket or not new_docket.strip():
+                st.warning("יש להזין מספר דוקט חדש")
+            else:
+                st.error("לא נמצא מספר שורה לעדכון")
     
     st.markdown("---")
     st.markdown("**📋 העתק הכל:**")
@@ -892,75 +825,7 @@ elif selected_tab == "📦 ניהול ספקים":
             original_dockets = edit_df[DOCKET_COL].copy() if DOCKET_COL and DOCKET_COL in edit_df.columns else None
             original_rows = edit_df['row_index'].copy() if 'row_index' in edit_df.columns else None
             
-            # Initialize selected rows in session state
-            if 'selected_rows_batch' not in st.session_state:
-                st.session_state.selected_rows_batch = set()
-            
-            # Add checkbox column for batch selection
-            edit_df_with_selection = edit_df.copy()
-            edit_df_with_selection['בחר'] = False
-            
-            # Restore previous selections
-            if st.session_state.selected_rows_batch:
-                for idx in st.session_state.selected_rows_batch:
-                    if idx < len(edit_df_with_selection):
-                        edit_df_with_selection.iloc[idx, edit_df_with_selection.columns.get_loc('בחר')] = True
-            
             st.markdown(f"### 📝 לחץ על תא דוקט לעריכה ({len(edit_df)} שורות)")
-            
-            # Batch selection controls
-            batch_cols = st.columns([1, 1, 1, 2, 1])
-            with batch_cols[0]:
-                if st.button("✅ בחר הכל", key="select_all_batch"):
-                    st.session_state.selected_rows_batch = set(range(len(edit_df)))
-                    st.rerun()
-            with batch_cols[1]:
-                if st.button("❌ בטל הכל", key="deselect_all_batch"):
-                    st.session_state.selected_rows_batch = set()
-                    st.rerun()
-            with batch_cols[2]:
-                selected_count = len(st.session_state.selected_rows_batch)
-                st.info(f"📊 נבחרו: **{selected_count}** שורות")
-            with batch_cols[3]:
-                batch_docket = st.text_input(
-                    "🔢 עדכן דוקט לכל הנבחרים:",
-                    placeholder="הזן מספר דוקט לעדכון מרובה",
-                    key="batch_docket_input"
-                )
-            with batch_cols[4]:
-                if st.button("💾 עדכן נבחרים", key="update_batch_docket", type="primary", disabled=selected_count == 0 or not batch_docket):
-                    if batch_docket and batch_docket.strip() and selected_count > 0:
-                        with st.spinner(f"מעדכן {selected_count} שורות..."):
-                            success_count = 0
-                            errors = []
-                            for idx in st.session_state.selected_rows_batch:
-                                if idx < len(original_rows):
-                                    row_idx = int(original_rows.iloc[idx]) if pd.notna(original_rows.iloc[idx]) else None
-                                    if row_idx:
-                                        success, msg = update_docket_number(row_idx, batch_docket.strip())
-                                        if success:
-                                            success_count += 1
-                                        else:
-                                            errors.append(f"שורה {row_idx}: {msg}")
-                            
-                            if success_count > 0:
-                                load_data_from_sheet.clear()
-                                st.session_state.selected_rows_batch = set()  # Clear selection after update
-                                st.success(f"✅ עודכנו {success_count} שורות עם דוקט: {batch_docket}")
-                                st.balloons()
-                                if errors:
-                                    for err in errors[:5]:  # Show first 5 errors
-                                        st.warning(err)
-                                st.rerun()
-                            elif errors:
-                                for err in errors:
-                                    st.error(err)
-                    elif not batch_docket or not batch_docket.strip():
-                        st.warning("יש להזין מספר דוקט")
-                    else:
-                        st.warning("לא נבחרו שורות לעדכון")
-            
-            st.markdown("---")
             
             st.markdown(
                 """
@@ -1006,7 +871,6 @@ elif selected_tab == "📦 ניהול ספקים":
             )
             
             column_config = {
-                'בחר': st.column_config.CheckboxColumn('בחר', default=False),
                 'row_index': st.column_config.NumberColumn('שורה', disabled=True),
                 'order date': st.column_config.TextColumn('תאריך הזמנה', disabled=True),
                 'orderd': st.column_config.TextColumn('סטטוס', disabled=True),
@@ -1020,35 +884,17 @@ elif selected_tab == "📦 ניהול ספקים":
                 'SUPP order number': st.column_config.TextColumn('מספר הזמנה ספק', disabled=True),
             }
             
-            # Reorder columns to put 'בחר' first
-            cols_order = ['בחר'] + [col for col in edit_df_with_selection.columns if col != 'בחר']
-            edit_df_with_selection = edit_df_with_selection[cols_order]
-            
-            # Store previous state to detect changes
-            docket_editor_key = "docket_editor"
-            if docket_editor_key not in st.session_state:
-                st.session_state[docket_editor_key] = None
-            
+            # st.data_editor automatically manages session_state with the key
+            # We just need to get the return value directly
             edited_df = st.data_editor(
-                edit_df_with_selection,
+                edit_df,
                 column_config=column_config,
                 use_container_width=True,
                 height=450,
                 num_rows="fixed",
                 hide_index=True,
-                key=docket_editor_key
+                key="docket_editor"
             )
-            
-            # Only process if button clicked, not on every edit
-            # The button click will trigger the save logic
-            
-            # Update selected rows based on checkbox column
-            if 'בחר' in edited_df.columns:
-                selected_indices = edited_df[edited_df['בחר'] == True].index.tolist()
-                st.session_state.selected_rows_batch = set(selected_indices)
-            
-            # Remove 'בחר' column from edited_df for further processing
-            edited_df = edited_df.drop(columns=['בחר'], errors='ignore')
             
             col_save, col_info = st.columns([1, 3])
             with col_save:
@@ -1092,21 +938,13 @@ elif selected_tab == "📦 ניהול ספקים":
             
             st.markdown("---")
             
-            # Use the final filtered edit_df for CSV export (not filtered_df)
-            # Remove any temporary columns that might exist
-            csv_df = edit_df.copy()
-            csv_df = csv_df.drop(columns=['_date_parsed'], errors='ignore')
-            csv_df = csv_df.drop(columns=['בחר'], errors='ignore')
-            
-            # If edit_df was filtered further, use it; otherwise use filtered_df
-            csv = csv_df.to_csv(index=False).encode('utf-8-sig')
+            csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label="📥 הורד כ-CSV",
                 data=csv,
-                file_name=f"orders_filtered_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                file_name=f"orders_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv",
-                key="download_csv",
-                help=f"מוריד {len(csv_df)} שורות מסוננות (מתוך {len(df)} סה\"כ)"
+                key="download_csv"
             )
         else:
             st.error("לא נמצאו עמודות להצגה")
@@ -1117,207 +955,199 @@ elif selected_tab == "➕ הוספה ידנית":
     
     st.markdown("---")
     
-    # Wrap all input fields in a form to prevent rerun on input change
-    with st.form(key="agents_manual_order_form", clear_on_submit=False):
-        col_form1, col_form2 = st.columns(2)
-        
-        with col_form1:
-            st.markdown("### 📋 פרטי הזמנה")
-            
-            current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            order_date = st.text_input(
-                "📅 תאריך הזמנה:",
-                value=current_datetime,
-                disabled=True,
-                key="manual_order_date"
-            )
-            
-            status_options = ["new", "נשלח ולא שולם"]
-            selected_status = st.selectbox(
-                "📊 סטטוס:",
-                status_options,
-                index=0,
-                key="manual_status"
-            )
-            
-            existing_sources = get_unique_sources(df)
-            source_mode = st.radio(
-                "🏷️ מקור:",
-                ["בחר מקור קיים", "הזנה ידנית"],
-                horizontal=True,
-                key="source_mode"
-            )
-            
-            if source_mode == "בחר מקור קיים":
-                source_option = st.selectbox(
-                    "בחר מקור:",
-                    ["-- בחר --"] + existing_sources,
-                    key="manual_source_select"
-                )
-                final_source = "" if source_option == "-- בחר --" else source_option
-            else:
-                final_source = st.text_input(
-                    "הזן מקור:",
-                    placeholder="לדוגמה: WhatsApp, Telegram",
-                    key="manual_new_source"
-                )
-            
-            auto_order_num = generate_order_number(df)
-            order_number = st.text_input(
-                "🔢 מספר הזמנה:",
-                value=auto_order_num,
-                key="manual_order_number"
-            )
-            
-            docket_number = st.text_input(
-                "📄 מספר דוקט:",
-                placeholder="הזן מספר דוקט",
-                key="manual_docket"
-            )
-        
-        with col_form2:
-            st.markdown("### 🎫 פרטי אירוע")
-            
-            events_dict = get_unique_events(df)
-            event_options = ["-- בחר אירוע קיים --"] + list(events_dict.keys()) + ["➕ הזן אירוע חדש"]
-            selected_event = st.selectbox(
-                "🎭 שם אירוע:",
-                event_options,
-                key="manual_event_select"
-            )
-            
-            if selected_event == "➕ הזן אירוע חדש":
-                event_name = st.text_input(
-                    "הזן שם אירוע:",
-                    placeholder="לדוגמה: Real Madrid vs Barcelona",
-                    key="manual_new_event"
-                )
-                event_date = st.text_input(
-                    "📅 תאריך אירוע:",
-                    placeholder="DD/MM/YYYY",
-                    key="manual_event_date"
-                )
-            elif selected_event == "-- בחר אירוע קיים --":
-                event_name = ""
-                event_date = ""
-            else:
-                event_name = selected_event
-                event_date = events_dict.get(selected_event, "")
-                st.info(f"📅 תאריך אירוע: {event_date}" if event_date else "📅 תאריך אירוע: לא נמצא")
-            
-            category_options = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "VIP", "PREMIUM", "LONGSIDE", "TIER 1", "TIER 2"]
-            category_mode = st.radio(
-                "🏟️ קטגוריה / סקציה:",
-                ["בחר קטגוריה", "הזנה ידנית"],
-                horizontal=True,
-                key="category_mode"
-            )
-            
-            if category_mode == "בחר קטגוריה":
-                category = st.selectbox(
-                    "בחר קטגוריה:",
-                    ["-- בחר --"] + category_options,
-                    key="manual_category_select"
-                )
-                if category == "-- בחר --":
-                    category = ""
-            else:
-                category = st.text_input(
-                    "הזן קטגוריה:",
-                    placeholder="לדוגמה: CAT 1, VIP, LONGSIDE",
-                    key="manual_category"
-                )
-            
-            quantity = st.number_input(
-                "🔢 כמות כרטיסים:",
-                min_value=1,
-                value=1,
-                step=1,
-                key="manual_quantity"
-            )
-        
-        st.markdown("---")
-        st.markdown("### 💰 פרטי מחיר")
-        
-        price_cols = st.columns([2, 1, 2])
-        
-        with price_cols[0]:
-            price_per_ticket = st.number_input(
-                "💶 מחיר לכרטיס:",
-                min_value=0.0,
-                value=0.0,
-                step=0.01,
-                format="%.2f",
-                key="manual_price"
-            )
-        
-        with price_cols[1]:
-            currency = st.selectbox(
-                "מטבע:",
-                ["€", "£", "$"],
-                index=0,
-                key="manual_currency"
-            )
-        
-        with price_cols[2]:
-            total = quantity * price_per_ticket
-            st.markdown(f"### סה\"כ: {currency}{total:.2f}")
-            st.caption(f"({quantity} × {currency}{price_per_ticket:.2f})")
-        
-        st.markdown("---")
-        
-        col_submit, col_clear = st.columns([1, 1])
-        
-        with col_submit:
-            submitted = st.form_submit_button("✅ הוסף הזמנה", type="primary", use_container_width=True)
-        
-        with col_clear:
-            clear_clicked = st.form_submit_button("🗑️ נקה טופס", use_container_width=True)
+    col_form1, col_form2 = st.columns(2)
     
-    # Handle form submission
-    if submitted:
-        if not event_name:
-            st.error("❌ יש לבחור או להזין שם אירוע")
-        elif not final_source:
-            st.error("❌ יש לבחור או להזין מקור")
-        elif price_per_ticket <= 0:
-            st.error("❌ יש להזין מחיר לכרטיס")
+    with col_form1:
+        st.markdown("### 📋 פרטי הזמנה")
+        
+        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        order_date = st.text_input(
+            "📅 תאריך הזמנה:",
+            value=current_datetime,
+            disabled=True,
+            key="manual_order_date"
+        )
+        
+        status_options = ["new", "נשלח ולא שולם"]
+        selected_status = st.selectbox(
+            "📊 סטטוס:",
+            status_options,
+            index=0,
+            key="manual_status"
+        )
+        
+        existing_sources = get_unique_sources(df)
+        source_mode = st.radio(
+            "🏷️ מקור:",
+            ["בחר מקור קיים", "הזנה ידנית"],
+            horizontal=True,
+            key="source_mode"
+        )
+        
+        if source_mode == "בחר מקור קיים":
+            source_option = st.selectbox(
+                "בחר מקור:",
+                ["-- בחר --"] + existing_sources,
+                key="manual_source_select"
+            )
+            final_source = "" if source_option == "-- בחר --" else source_option
         else:
-            order_data = {
-                'order date': current_datetime,
-                'orderd': selected_status,
-                'source': final_source,
-                'Order number': order_number,
-                'docket number': docket_number,
-                'event name': event_name,
-                'Date of the event': event_date,
-                'Category / Section': category,
-                'Qty': quantity,
-                'Price sold': f"{currency}{price_per_ticket:.2f}",
-                'TOTAL': f"{currency}{total:.2f}",
-            }
-            
-            with st.spinner("מוסיף הזמנה לגוגל שיטס..."):
-                success, message = add_new_order_to_sheet(order_data)
-                
-                if success:
-                    load_data_from_sheet.clear()
-                    st.success(f"✅ {message}")
-                    st.balloons()
-                    st.markdown(f"""
-                    **פרטי ההזמנה שנוספה:**
-                    - מספר הזמנה: `{order_number}`
-                    - אירוע: `{event_name}`
-                    - כמות: `{quantity}`
-                    - מחיר לכרטיס: `{currency}{price_per_ticket:.2f}`
-                    - סה"כ (יחושב בשיטס): `{currency}{total:.2f}`
-                    """)
-                else:
-                    st.error(f"❌ {message}")
+            final_source = st.text_input(
+                "הזן מקור:",
+                placeholder="לדוגמה: WhatsApp, Telegram",
+                key="manual_new_source"
+            )
+        
+        auto_order_num = generate_order_number(df)
+        order_number = st.text_input(
+            "🔢 מספר הזמנה:",
+            value=auto_order_num,
+            key="manual_order_number"
+        )
+        
+        docket_number = st.text_input(
+            "📄 מספר דוקט:",
+            placeholder="הזן מספר דוקט",
+            key="manual_docket"
+        )
     
-    # Handle clear button
-    if clear_clicked:
-        st.rerun()
+    with col_form2:
+        st.markdown("### 🎫 פרטי אירוע")
+        
+        events_dict = get_unique_events(df)
+        event_options = ["-- בחר אירוע קיים --"] + list(events_dict.keys()) + ["➕ הזן אירוע חדש"]
+        selected_event = st.selectbox(
+            "🎭 שם אירוע:",
+            event_options,
+            key="manual_event_select"
+        )
+        
+        if selected_event == "➕ הזן אירוע חדש":
+            event_name = st.text_input(
+                "הזן שם אירוע:",
+                placeholder="לדוגמה: Real Madrid vs Barcelona",
+                key="manual_new_event"
+            )
+            event_date = st.text_input(
+                "📅 תאריך אירוע:",
+                placeholder="DD/MM/YYYY",
+                key="manual_event_date"
+            )
+        elif selected_event == "-- בחר אירוע קיים --":
+            event_name = ""
+            event_date = ""
+        else:
+            event_name = selected_event
+            event_date = events_dict.get(selected_event, "")
+            st.info(f"📅 תאריך אירוע: {event_date}" if event_date else "📅 תאריך אירוע: לא נמצא")
+        
+        category_options = ["CAT 1", "CAT 2", "CAT 3", "CAT 4", "VIP", "PREMIUM", "LONGSIDE", "TIER 1", "TIER 2"]
+        category_mode = st.radio(
+            "🏟️ קטגוריה / סקציה:",
+            ["בחר קטגוריה", "הזנה ידנית"],
+            horizontal=True,
+            key="category_mode"
+        )
+        
+        if category_mode == "בחר קטגוריה":
+            category = st.selectbox(
+                "בחר קטגוריה:",
+                ["-- בחר --"] + category_options,
+                key="manual_category_select"
+            )
+            if category == "-- בחר --":
+                category = ""
+        else:
+            category = st.text_input(
+                "הזן קטגוריה:",
+                placeholder="לדוגמה: CAT 1, VIP, LONGSIDE",
+                key="manual_category"
+            )
+        
+        quantity = st.number_input(
+            "🔢 כמות כרטיסים:",
+            min_value=1,
+            value=1,
+            step=1,
+            key="manual_quantity"
+        )
+    
+    st.markdown("---")
+    st.markdown("### 💰 פרטי מחיר")
+    
+    price_cols = st.columns([2, 1, 2])
+    
+    with price_cols[0]:
+        price_per_ticket = st.number_input(
+            "💶 מחיר לכרטיס:",
+            min_value=0.0,
+            value=0.0,
+            step=0.01,
+            format="%.2f",
+            key="manual_price"
+        )
+    
+    with price_cols[1]:
+        currency = st.selectbox(
+            "מטבע:",
+            ["€", "£", "$"],
+            index=0,
+            key="manual_currency"
+        )
+    
+    with price_cols[2]:
+        total = quantity * price_per_ticket
+        st.markdown(f"### סה\"כ: {currency}{total:.2f}")
+        st.caption(f"({quantity} × {currency}{price_per_ticket:.2f})")
+    
+    st.markdown("---")
+    
+    col_submit, col_clear = st.columns([1, 1])
+    
+    with col_submit:
+        if st.button("✅ הוסף הזמנה", key="submit_manual_order", type="primary", use_container_width=True):
+            if not event_name:
+                st.error("❌ יש לבחור או להזין שם אירוע")
+            elif not final_source:
+                st.error("❌ יש לבחור או להזין מקור")
+            elif price_per_ticket <= 0:
+                st.error("❌ יש להזין מחיר לכרטיס")
+            else:
+                order_data = {
+                    'order date': current_datetime,
+                    'orderd': selected_status,
+                    'source': final_source,
+                    'Order number': order_number,
+                    'docket number': docket_number,
+                    'event name': event_name,
+                    'Date of the event': event_date,
+                    'Category / Section': category,
+                    'Qty': quantity,
+                    'Price sold': f"{currency}{price_per_ticket:.2f}",
+                    'TOTAL': f"{currency}{total:.2f}",
+                }
+                
+                with st.spinner("מוסיף הזמנה לגוגל שיטס..."):
+                    success, message = add_new_order_to_sheet(order_data)
+                    
+                    if success:
+                        load_data_from_sheet.clear()
+                        st.success(f"✅ {message}")
+                        st.balloons()
+                        st.markdown(f"""
+                        **פרטי ההזמנה שנוספה:**
+                        - מספר הזמנה: `{order_number}`
+                        - אירוע: `{event_name}`
+                        - כמות: `{quantity}`
+                        - מחיר לכרטיס: `{currency}{price_per_ticket:.2f}`
+                        - סה"כ (יחושב בשיטס): `{currency}{total:.2f}`
+                        """)
+                    else:
+                        st.error(f"❌ {message}")
+    
+    with col_clear:
+        if st.button("🗑️ נקה טופס", key="clear_manual_form", use_container_width=True):
+            st.rerun()
     
     st.markdown("---")
     st.info("""
