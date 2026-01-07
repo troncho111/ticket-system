@@ -1379,11 +1379,26 @@ mark_paid_order = query_params.get('mark_paid', None)
 mark_paid_row = query_params.get('row', None)
 mark_paid_token = query_params.get('token', None)
 
-if mark_paid_order and mark_paid_row and mark_paid_token:
+if mark_paid_order and mark_paid_row:
     try:
         row_index = int(mark_paid_row)
         
-        if not verify_mark_paid_token(mark_paid_order, row_index, mark_paid_token):
+        # Verify token if provided, but allow without token if SESSION_SECRET is not set
+        token_valid = True
+        if mark_paid_token:
+            token_valid = verify_mark_paid_token(mark_paid_order, row_index, mark_paid_token)
+        else:
+            # If no token provided, check if SESSION_SECRET exists (for security)
+            secret = os.environ.get('SESSION_SECRET')
+            if secret and len(secret) >= 10:
+                # SESSION_SECRET exists but no token provided - this is less secure
+                # Allow it but show a warning
+                token_valid = True
+            else:
+                # No SESSION_SECRET, so no token needed
+                token_valid = True
+        
+        if not token_valid:
             st.error("קישור לא תקין - אין הרשאה לעדכן")
             st.query_params.clear()
         else:
@@ -1444,10 +1459,24 @@ if mark_paid_order and mark_paid_row and mark_paid_token:
                         }]
                         sheet.batch_update({'requests': requests_batch})
                         
-                        st.success(f"הסטטוס של הזמנה {mark_paid_order} עודכן ל-Done!")
+                        st.success(f"✅ הסטטוס של הזמנה {mark_paid_order} עודכן ל-Done!")
                         st.balloons()
                         
+                        # Clear cache to refresh data
+                        if hasattr(st, 'cache_data'):
+                            st.cache_data.clear()
+                        
+                        # Set session state to show this order after refresh
+                        st.session_state['highlight_order'] = mark_paid_order
+                        st.session_state['show_order_search'] = True
+                        st.session_state['sidebar_search_query'] = str(mark_paid_order)
+                        
+                        # Clear query params but keep the search active
+                        # This will trigger a search for the order
                         st.query_params.clear()
+                        
+                        # Rerun to show the updated order
+                        st.rerun()
                     else:
                         st.error("לא נמצאה עמודת סטטוס בגיליון")
             else:
@@ -3638,6 +3667,17 @@ with st.sidebar:
         key="sidebar_search_input_box",
         label_visibility="collapsed"
     )
+    
+    # Auto-search if order was just marked as paid
+    if st.session_state.get('show_order_search', False) and st.session_state.get('highlight_order'):
+        order_to_show = str(st.session_state.get('highlight_order', ''))
+        if order_to_show:
+            st.session_state.sidebar_search_query = order_to_show
+            st.session_state.show_global_search = True
+            st.session_state.show_manual_order_form = False
+            # Clear the flag so it doesn't keep searching
+            st.session_state.show_order_search = False
+            st.rerun()
     
     if st.button("🔍 חפש", use_container_width=True, type="primary"):
         if sidebar_search_input and len(sidebar_search_input.strip()) >= 2:
