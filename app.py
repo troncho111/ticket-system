@@ -6063,7 +6063,11 @@ with tab4:
             
             st.markdown("---")
             
-            for idx, (_, order) in enumerate(all_new_orders.iterrows()):
+            # Use st.fragment to prevent full app rerun when typing in forms
+            # This isolates the rerun to only the fragment, not the entire app
+            @st.fragment
+            def render_order_forms(orders_df):
+                for idx, (_, order) in enumerate(orders_df.iterrows()):
                 order_num = order.get('Order number', '-')
                 event_name = str(order.get('event name', '-'))[:50]
                 event_date = order.get('Date of the event', '-')
@@ -6192,6 +6196,9 @@ with tab4:
                                     st.rerun()
                             else:
                                 st.warning("לא נמצא מספר שורה - לא ניתן למחוק")
+            
+            # Call the fragment function
+            render_order_forms(all_new_orders)
         else:
             st.success("🎉 אין הזמנות חדשות לטיפול! כל ההזמנות טופלו.")
     else:
