@@ -6393,7 +6393,7 @@ with tab4:
                             
                             # Handle save button click INSIDE form
                             if save_clicked:
-                        if row_idx:
+                                if row_idx:
                             try:
                                 client = get_gspread_client()
                                 sheet = client.open(SHEET_NAME)
