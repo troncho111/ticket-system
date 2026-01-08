@@ -6,6 +6,10 @@ from datetime import datetime
 import json
 import re
 import os
+from utils import (
+    export_to_excel, export_to_csv, get_smart_alerts,
+    save_search_query, load_saved_searches, create_change_log, get_recent_changes
+)
 
 st.set_page_config(
     page_title="הנהלת חשבונות - סוכנים",
@@ -344,8 +348,17 @@ def show_order_details(row, docket_col, unique_key=""):
         if st.button("✅ עדכן", key=f"update_btn_{unique_key}_{order_num}", type="primary"):
             if new_docket and new_docket.strip() and row_idx:
                 with st.spinner("מעדכן בגוגל שיטס..."):
+                    old_docket = str(docket) if docket and str(docket) != '-' else ''
                     success, message = update_docket_number(row_idx, new_docket.strip())
                     if success:
+                        # Log the change
+                        create_change_log(
+                            action='update_docket',
+                            order_id=str(order_num),
+                            old_value=old_docket,
+                            new_value=new_docket.strip(),
+                            user='user'
+                        )
                         load_data_from_sheet.clear()
                         st.success(f"✅ {message}")
                         st.balloons()
@@ -442,9 +455,32 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# Smart Alerts Section
+if data_loaded and len(df) > 0:
+    alerts = get_smart_alerts(df, DOCKET_COL, STATUS_COL, 'Date of the event')
+    if alerts:
+        st.markdown("### 🔔 התראות חכמות")
+        alert_cols = st.columns(min(len(alerts), 4))
+        for idx, alert in enumerate(alerts[:4]):  # Show max 4 alerts
+            with alert_cols[idx % len(alert_cols)]:
+                alert_colors = {
+                    'error': '#f8d7da',
+                    'warning': '#fff3cd',
+                    'info': '#d1ecf1',
+                    'success': '#d4edda'
+                }
+                st.markdown(f"""
+                <div style='background-color: {alert_colors.get(alert["type"], "#f0f0f0")}; 
+                            padding: 10px; border-radius: 5px; border-left: 4px solid {"#dc3545" if alert["type"] == "error" else "#ffc107" if alert["type"] == "warning" else "#17a2b8" if alert["type"] == "info" else "#28a745"}; 
+                            margin-bottom: 5px;'>
+                    <strong>{alert["icon"]} {alert["title"]}:</strong> {alert["count"]}<br>
+                    <small>{alert["message"]}</small>
+                </div>
+                """, unsafe_allow_html=True)
+
 st.header("💼 הנהלת חשבונות - סוכנים")
 
-TAB_OPTIONS = ["🔍 חיפוש הזמנות", "📦 ניהול ספקים", "➕ הוספה ידנית"]
+TAB_OPTIONS = ["🔍 חיפוש הזמנות", "📦 ניהול ספקים", "➕ הוספה ידנית", "📥 ייבוא נתונים", "📜 היסטוריית שינויים"]
 
 selected_tab = st.radio(
     "",
@@ -1064,6 +1100,21 @@ elif selected_tab == "📦 ניהול ספקים":
                                     errors.append(f"שורה {row_idx}: {msg}")
                         
                         if changes_made > 0:
+                            # Log changes
+                            for i in range(len(edited_df)):
+                                new_val = str(edited_df.iloc[i].get(DOCKET_COL, ''))
+                                old_val = str(original_dockets.iloc[i]) if i < len(original_dockets) else ''
+                                row_idx = int(original_rows.iloc[i]) if i < len(original_rows) else None
+                                if new_val != old_val and row_idx:
+                                    order_num = edited_df.iloc[i].get(ORDER_COL, 'Unknown') if ORDER_COL else 'Unknown'
+                                    create_change_log(
+                                        action='batch_update_docket',
+                                        order_id=str(order_num),
+                                        old_value=old_val,
+                                        new_value=new_val,
+                                        user='user'
+                                    )
+                            
                             load_data_from_sheet.clear()
                             st.success(f"✅ עודכנו {changes_made} שורות!")
                             st.balloons()
@@ -1086,14 +1137,62 @@ elif selected_tab == "📦 ניהול ספקים":
             
             st.markdown("---")
             
-            csv = filtered_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 הורד כ-CSV",
-                data=csv,
-                file_name=f"orders_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                key="download_csv"
-            )
+            # Enhanced Export Section
+            st.markdown("### 📥 ייצוא נתונים")
+            export_cols = st.columns(3)
+            
+            with export_cols[0]:
+                csv_data = export_to_csv(filtered_df)
+                st.download_button(
+                    label="📄 הורד CSV",
+                    data=csv_data,
+                    file_name=f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_csv_enhanced",
+                    use_container_width=True
+                )
+            
+            with export_cols[1]:
+                try:
+                    excel_data = export_to_excel(filtered_df)
+                    st.download_button(
+                        label="📊 הורד Excel",
+                        data=excel_data,
+                        file_name=f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_excel",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.info("💡 Excel דורש openpyxl - התקן: pip install openpyxl")
+            
+            with export_cols[2]:
+                if st.button("💾 שמור חיפוש", key="save_current_search", use_container_width=True):
+                    search_name = st.text_input("שם החיפוש:", key="search_name_input")
+                    if search_name:
+                        filters = {
+                            'sources': st.session_state.get('applied_supplier_filters', {}).get('sources', []),
+                            'events': st.session_state.get('applied_supplier_filters', {}).get('event', 'הכל'),
+                            'suppliers': st.session_state.get('applied_supplier_filters', {}).get('supps', []),
+                            'docket': st.session_state.get('applied_supplier_filters', {}).get('docket', 'הכל'),
+                            'quick_search': st.session_state.get('quick_search_supplier', '')
+                        }
+                        save_search_query(search_name, filters)
+                        st.success(f"✅ החיפוש '{search_name}' נשמר!")
+            
+            # Load saved searches
+            saved_searches = load_saved_searches()
+            if saved_searches:
+                st.markdown("#### 💾 חיפושים שמורים")
+                search_names = list(saved_searches.keys())
+                selected_saved = st.selectbox("בחר חיפוש שמור:", ["-- בחר --"] + search_names, key="load_saved_search")
+                if selected_saved != "-- בחר --":
+                    saved_filters = saved_searches[selected_saved]['filters']
+                    st.info(f"💾 חיפוש: {selected_saved}")
+                    if st.button("📂 טען חיפוש זה", key=f"load_{selected_saved}"):
+                        st.session_state['applied_supplier_filters'] = saved_filters
+                        st.session_state['quick_search_supplier'] = saved_filters.get('quick_search', '')
+                        st.rerun()
         else:
             st.error("לא נמצאו עמודות להצגה")
 
@@ -1305,6 +1404,182 @@ elif selected_tab == "➕ הוספה ידנית":
     - בחר אירוע קיים כדי למשוך את תאריך האירוע אוטומטית
     - עמודת 'סה"כ מכירה' (N) תתעדכן אוטומטית לפי הנוסחה בשיטס
     """)
+
+elif selected_tab == "📥 ייבוא נתונים":
+    st.subheader("📥 ייבוא הזמנות מקובץ")
+    st.markdown("ייבא הזמנות מקובץ CSV או Excel")
+    
+    st.markdown("---")
+    
+    uploaded_file = st.file_uploader(
+        "בחר קובץ לייבוא:",
+        type=['csv', 'xlsx', 'xls'],
+        help="הקובץ צריך לכלול עמודות: Order number, event name, source, Qty, Price sold, וכו'"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Read file based on type
+            if uploaded_file.name.endswith('.csv'):
+                import_df = pd.read_csv(uploaded_file)
+            else:
+                import_df = pd.read_excel(uploaded_file)
+            
+            st.success(f"✅ הקובץ נטען בהצלחה! {len(import_df)} שורות")
+            
+            # Show preview
+            st.markdown("### 👀 תצוגה מקדימה")
+            st.dataframe(import_df.head(10), use_container_width=True)
+            
+            # Column mapping
+            st.markdown("### 🔗 מיפוי עמודות")
+            st.info("בחר איזה עמודה בקובץ מתאימה לכל שדה במערכת")
+            
+            required_cols = ['Order number', 'event name', 'source', 'Qty', 'Price sold']
+            optional_cols = ['docket number', 'Date of the event', 'Category / Section', 'Supplier NAME', 'SUPP PRICE']
+            
+            col_mapping = {}
+            
+            for col in required_cols:
+                available_cols = ['-- לא מיפוי --'] + list(import_df.columns)
+                selected = st.selectbox(
+                    f"עמודה עבור '{col}':",
+                    available_cols,
+                    key=f"map_{col}",
+                    index=0
+                )
+                if selected != '-- לא מיפוי --':
+                    col_mapping[col] = selected
+            
+            st.markdown("---")
+            
+            # Import button
+            if st.button("📥 ייבא הזמנות", type="primary", use_container_width=True):
+                # Validate mapping
+                missing = [col for col in required_cols if col not in col_mapping]
+                if missing:
+                    st.error(f"❌ חסרים מיפויים עבור: {', '.join(missing)}")
+                else:
+                    with st.spinner("מייבא הזמנות..."):
+                        try:
+                            # Map columns and prepare data
+                            mapped_df = import_df.copy()
+                            for sys_col, file_col in col_mapping.items():
+                                if file_col in mapped_df.columns:
+                                    mapped_df[sys_col] = mapped_df[file_col]
+                            
+                            # Add to sheet
+                            success_count = 0
+                            for idx, row in mapped_df.iterrows():
+                                order_data = {
+                                    'order date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    'orderd': 'new',
+                                    'source': row.get('source', ''),
+                                    'Order number': str(row.get('Order number', '')),
+                                    'docket number': row.get('docket number', ''),
+                                    'event name': row.get('event name', ''),
+                                    'Date of the event': row.get('Date of the event', ''),
+                                    'Category / Section': row.get('Category / Section', ''),
+                                    'Qty': row.get('Qty', 1),
+                                    'Price sold': f"€{row.get('Price sold', 0)}",
+                                    'TOTAL': f"€{float(row.get('Price sold', 0)) * int(row.get('Qty', 1))}",
+                                }
+                                
+                                success, message = add_new_order_to_sheet(order_data)
+                                if success:
+                                    success_count += 1
+                                    create_change_log(
+                                        action='import_order',
+                                        order_id=str(order_data.get('Order number', '')),
+                                        old_value='',
+                                        new_value='imported',
+                                        user='user'
+                                    )
+                            
+                            load_data_from_sheet.clear()
+                            st.success(f"✅ יובאו בהצלחה {success_count} מתוך {len(mapped_df)} הזמנות!")
+                            st.balloons()
+                            
+                        except Exception as e:
+                            st.error(f"❌ שגיאה בייבוא: {str(e)}")
+        
+        except Exception as e:
+            st.error(f"❌ שגיאה בקריאת הקובץ: {str(e)}")
+            st.info("💡 ודא שהקובץ בפורמט תקין (CSV או Excel)")
+
+elif selected_tab == "📜 היסטוריית שינויים":
+    st.subheader("📜 היסטוריית שינויים")
+    st.markdown("צפייה בכל השינויים שבוצעו במערכת")
+    
+    st.markdown("---")
+    
+    recent_changes = get_recent_changes(limit=50)
+    
+    if not recent_changes:
+        st.info("📝 אין שינויים להצגה. השינויים יופיעו כאן לאחר עדכון נתונים.")
+    else:
+        st.markdown(f"### 📋 {len(recent_changes)} שינויים אחרונים")
+        
+        # Filter options
+        filter_cols = st.columns(3)
+        with filter_cols[0]:
+            filter_action = st.selectbox(
+                "סוג פעולה:",
+                ["הכל"] + list(set([ch['action'] for ch in recent_changes])),
+                key="change_filter_action"
+            )
+        with filter_cols[1]:
+            filter_order = st.text_input("מספר הזמנה:", key="change_filter_order", placeholder="הזן מספר הזמנה")
+        with filter_cols[2]:
+            limit_display = st.slider("מספר שורות:", 10, 50, 20, key="change_limit")
+        
+        # Filter changes
+        filtered_changes = recent_changes[:limit_display]
+        if filter_action != "הכל":
+            filtered_changes = [ch for ch in filtered_changes if ch['action'] == filter_action]
+        if filter_order:
+            filtered_changes = [ch for ch in filtered_changes if filter_order.lower() in str(ch.get('order_id', '')).lower()]
+        
+        # Display changes
+        if filtered_changes:
+            for change in filtered_changes:
+                action_icons = {
+                    'update_docket': '📄',
+                    'batch_update_docket': '📦',
+                    'add_order': '➕',
+                    'delete_order': '🗑️'
+                }
+                icon = action_icons.get(change['action'], '📝')
+                
+                change_time = datetime.fromisoformat(change['timestamp']) if isinstance(change['timestamp'], str) else change['timestamp']
+                time_str = change_time.strftime("%Y-%m-%d %H:%M:%S") if hasattr(change_time, 'strftime') else str(change_time)
+                
+                st.markdown(f"""
+                <div style='background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 4px solid #007bff;'>
+                    <strong>{icon} {change.get('action', 'שינוי')}</strong> | 
+                    הזמנה: <strong>{change.get('order_id', 'N/A')}</strong> | 
+                    זמן: {time_str}<br>
+                    <small>
+                        <strong>מ:</strong> {change.get('old_value', 'N/A')} → 
+                        <strong>ל:</strong> {change.get('new_value', 'N/A')}
+                    </small>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("לא נמצאו שינויים התואמים לסינון")
+        
+        # Export changes
+        if recent_changes:
+            st.markdown("---")
+            changes_df = pd.DataFrame(recent_changes)
+            changes_csv = changes_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 הורד היסטוריית שינויים (CSV)",
+                data=changes_csv,
+                file_name=f"change_log_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                key="download_changes"
+            )
 
 st.markdown("---")
 st.markdown(
