@@ -52,14 +52,62 @@ def get_gspread_client():
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    creds_json = os.environ.get("GOOGLE_CREDENTIALS")
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not found in environment")
     
-    if isinstance(creds_json, str):
-        creds_dict = json.loads(creds_json)
-    else:
-        creds_dict = dict(creds_json)
+    # Try to get from Streamlit secrets first (if available)
+    creds_json = None
+    try:
+        if hasattr(st, 'secrets') and 'GOOGLE_CREDENTIALS' in st.secrets:
+            creds_json = st.secrets['GOOGLE_CREDENTIALS']
+    except:
+        pass
+    
+    # Fallback to environment variable
+    if not creds_json:
+        creds_json = os.environ.get("GOOGLE_CREDENTIALS")
+    
+    if not creds_json:
+        raise ValueError("GOOGLE_CREDENTIALS not found in environment. Please set it in Streamlit Cloud Secrets.")
+    
+    # Handle different input formats
+    try:
+        if isinstance(creds_json, dict):
+            # Already a dictionary (from Streamlit secrets)
+            creds_dict = creds_json
+        elif isinstance(creds_json, str):
+            # Parse JSON string
+            creds_dict = json.loads(creds_json)
+        else:
+            # Try to convert to dict
+            creds_dict = dict(creds_json)
+        
+        # Ensure private_key is properly formatted (handle escaped newlines)
+        if 'private_key' in creds_dict and isinstance(creds_dict['private_key'], str):
+            private_key = creds_dict['private_key']
+            
+            # Handle escaped newlines - convert \n (two characters: backslash + n) to actual newline
+            if '\\n' in private_key:
+                private_key = private_key.replace('\\n', '\n')
+            
+            # Ensure proper format - verify BEGIN and END markers exist
+            if '-----BEGIN PRIVATE KEY-----' not in private_key:
+                raise ValueError("private_key לא מכיל '-----BEGIN PRIVATE KEY-----'")
+            
+            if '-----END PRIVATE KEY-----' not in private_key:
+                raise ValueError("private_key לא מכיל '-----END PRIVATE KEY-----'")
+            
+            creds_dict['private_key'] = private_key
+        
+        # Validate required fields
+        required_fields = ['type', 'project_id', 'private_key', 'client_email']
+        missing_fields = [f for f in required_fields if f not in creds_dict]
+        if missing_fields:
+            raise ValueError(f"Missing required fields in GOOGLE_CREDENTIALS: {', '.join(missing_fields)}")
+        
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in GOOGLE_CREDENTIALS: {str(e)}")
+    except Exception as e:
+        raise ValueError(f"Error parsing GOOGLE_CREDENTIALS: {str(e)}")
+    
     credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(credentials)
 
@@ -73,6 +121,7 @@ def find_column(df, *keywords):
 
 @st.cache_data(ttl=300)
 def load_data_from_sheet():
+    """Load data from Google Sheets with error handling"""
     try:
         client = get_gspread_client()
         sheet = client.open(SHEET_NAME)
@@ -92,9 +141,25 @@ def load_data_from_sheet():
         
         return df
         
+    except ValueError as e:
+        # Clear cache on error to avoid caching the error
+        load_data_from_sheet.clear()
+        # Re-raise with better message
+        error_msg = str(e)
+        if "GOOGLE_CREDENTIALS" in error_msg or "not found" in error_msg.lower():
+            raise ValueError(f"❌ **שגיאת אימות:** {error_msg}\n\n💡 **פתרון:** ודא ש-GOOGLE_CREDENTIALS מוגדר ב-Streamlit Cloud Secrets או במשתנה הסביבה.")
+        elif "private_key" in error_msg.lower():
+            raise ValueError(f"❌ **שגיאה במפתח האימות:** {error_msg}\n\n💡 **פתרון:** ודא שה-private_key ב-GOOGLE_CREDENTIALS כולל את כל המפתח עם \\n (escaped newlines).")
+        else:
+            raise ValueError(f"❌ **שגיאה בטעינת נתונים:** {error_msg}")
     except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return pd.DataFrame()
+        # Clear cache on error to avoid caching the error
+        load_data_from_sheet.clear()
+        error_msg = str(e)
+        if "No key could be detected" in error_msg or ("key" in error_msg.lower() and "detected" in error_msg.lower()):
+            raise Exception(f"❌ **שגיאת אימות:** לא ניתן לזהות מפתח אימות.\n\n💡 **פתרון:**\n1. ודא ש-GOOGLE_CREDENTIALS מוגדר ב-Streamlit Cloud Secrets\n2. ודא שה-JSON כולל את כל השדות הנדרשים: type, project_id, private_key, client_email\n3. ודא שה-private_key כולל את המפתח המלא עם \\n (escaped newlines)")
+        else:
+            raise Exception(f"❌ **שגיאה בטעינת נתונים:** {error_msg}")
 
 def update_docket_number(row_index, new_docket):
     try:
@@ -311,7 +376,47 @@ def show_order_details(row, docket_col, unique_key=""):
         display_field_with_copy("מחיר מקורי טוטל", total_original, f"total_orig_{unique_key}")
         display_field_with_copy("מחיר מכירה (€)", total_sold, f"total_sold_{unique_key}")
 
-df = load_data_from_sheet()
+# Connection status indicator function
+def check_connection_status():
+    """Check if connection to Google Sheets is working"""
+    try:
+        client = get_gspread_client()
+        sheet = client.open(SHEET_NAME)
+        worksheet = sheet.get_worksheet(WORKSHEET_INDEX)
+        # Try to read first row to verify connection
+        worksheet.row_values(1)
+        return True, "מחובר בהצלחה"
+    except Exception as e:
+        error_msg = str(e)
+        if len(error_msg) > 60:
+            error_msg = error_msg[:60] + "..."
+        return False, error_msg
+
+# Load data with proper error handling
+data_loaded = False
+connection_ok = False
+connection_msg = "בודק..."
+df = pd.DataFrame()
+
+try:
+    df = load_data_from_sheet()
+    data_loaded = True
+    connection_ok, connection_msg = check_connection_status()
+except Exception as e:
+    error_msg = str(e)
+    connection_ok, connection_msg = check_connection_status()
+    # Display error and status
+    status_color = "🔴"
+    status_bg = "#f8d7da"
+    st.markdown(f"""
+    <div style='background-color: {status_bg}; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid #dc3545;'>
+        <strong>{status_color} סטטוס חיבור:</strong> {connection_msg} | 
+        <strong>📅 זמן טעינה:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | 
+        <strong>⚠️ שגיאה בטעינת נתונים</strong>
+    </div>
+    """, unsafe_allow_html=True)
+    st.error(error_msg)
+    st.stop()
 
 DOCKET_COL = find_column(df, 'docket', 'number')
 ORDER_COL = 'Order number' if 'Order number' in df.columns else None
@@ -323,6 +428,19 @@ if 'selected_order_idx' not in st.session_state:
 
 if 'agents_active_tab' not in st.session_state:
     st.session_state.agents_active_tab = "🔍 חיפוש הזמנות"
+
+# Display connection status at the top
+status_color = "🟢" if connection_ok else "🔴"
+status_bg = "#d4edda" if connection_ok else "#f8d7da"
+data_count = len(df) if data_loaded else 0
+
+st.markdown(f"""
+<div style='background-color: {status_bg}; padding: 10px; border-radius: 5px; margin-bottom: 10px; border-left: 4px solid {"#28a745" if connection_ok else "#dc3545"};'>
+    <strong>{status_color} סטטוס חיבור:</strong> {connection_msg} | 
+    <strong>📅 זמן טעינה:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} | 
+    <strong>📊 נתונים נטענו:</strong> {data_count} שורות
+</div>
+""", unsafe_allow_html=True)
 
 st.header("💼 הנהלת חשבונות - סוכנים")
 
