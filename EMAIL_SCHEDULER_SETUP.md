@@ -19,21 +19,35 @@ GitHub Actions יכול להריץ את המיילים אוטומטית לפי �
 
 #### איך להפעיל:
 
-1. **הוסף Secrets ל-GitHub:**
-   - לך ל-GitHub repository שלך
-   - Settings → Secrets and variables → Actions
-   - הוסף את ה-Secrets הבאים:
-     - `GOOGLE_CREDENTIALS` - ה-JSON המלא
-     - `RESEND_API_KEY` - מפתח API של Resend
-     - `RESEND_FROM_EMAIL` - כתובת המייל
+1. **העתק Secrets מ-Streamlit Cloud ל-GitHub:**
+   
+   **א. קבל את ה-Secrets מ-Streamlit Cloud:**
+   - לך ל-Streamlit Cloud Dashboard
+   - בחר את האפליקציה שלך
+   - לך ל-Settings → Secrets
+   - העתק את הערכים של:
+     - `GOOGLE_CREDENTIALS` (ה-JSON המלא)
+     - `RESEND_API_KEY` (אם קיים)
+     - `RESEND_FROM_EMAIL` (אם קיים)
+   
+   **ב. הוסף אותם ל-GitHub Actions:**
+   - לך ל-GitHub repository: `https://github.com/troncho111/ticket-system`
+   - לחץ על **Settings** → **Secrets and variables** → **Actions**
+   - לחץ על **New repository secret**
+   - הוסף כל אחד מהערכים שהעתקת:
+     - Name: `GOOGLE_CREDENTIALS` → Value: (העתק מה-Streamlit)
+     - Name: `RESEND_API_KEY` → Value: (העתק מה-Streamlit)
+     - Name: `RESEND_FROM_EMAIL` → Value: (העתק מה-Streamlit)
 
 2. **ה-workflow כבר מוכן!**
    - הקובץ `.github/workflows/email-scheduler.yml` כבר קיים
    - הוא ירוץ אוטומטית לפי הלוח זמנים
+   - **אין צורך לשנות כלום בקוד!**
 
 3. **בדוק שהכל עובד:**
-   - לך ל-Actions tab ב-GitHub
-   - תראה את ה-workflow רץ
+   - לך ל-**Actions** tab ב-GitHub
+   - תראה workflow בשם "Email Scheduler"
+   - לחץ עליו כדי לראות את הסטטוס
    - אם יש שגיאות, תראה אותן שם
 
 #### יתרונות:

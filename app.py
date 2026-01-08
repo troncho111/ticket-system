@@ -6944,9 +6944,11 @@ with tab7:
     st.success("""
     **ה-workflow כבר מוכן!** כל מה שצריך זה:
     
-    1. **הוסף Secrets ל-GitHub:**
-       - לך ל-Settings → Secrets and variables → Actions
-       - הוסף: `GOOGLE_CREDENTIALS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
+    1. **העתק Secrets מ-Streamlit Cloud ל-GitHub:**
+       - לך ל-Streamlit Cloud → Settings → Secrets
+       - העתק את: `GOOGLE_CREDENTIALS`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
+       - לך ל-GitHub → Settings → Secrets and variables → Actions
+       - הוסף אותם שם (אותם ערכים בדיוק!)
     
     2. **ה-workflow ירוץ אוטומטית!**
        - לך ל-Actions tab ב-GitHub
