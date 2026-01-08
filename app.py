@@ -2113,9 +2113,7 @@ def load_data_from_sheet():
         data = worksheet.get_all_values()
         
         if len(data) < 2:
-            # Clear any previous error state on successful connection
-            if 'sheet_error' in st.session_state:
-                del st.session_state.sheet_error
+            # Return empty DataFrame - don't access session_state in cached function
             return pd.DataFrame()
         
         headers = [str(h).strip() for h in data[0]]
@@ -2220,66 +2218,24 @@ def load_data_from_sheet():
         # This avoids repeated apply() calls throughout the app
         df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
         
-        # Clear any previous error state on successful load
-        if 'sheet_error' in st.session_state:
-            del st.session_state.sheet_error
-        
+        # Don't access session_state in cached function - return df only
         return df
         
     except ValueError as e:
-        error_msg = ""
-        if "GOOGLE_CREDENTIALS" in str(e):
-            error_msg = "❌ **שגיאת אימות:** משתנה הסביבה GOOGLE_CREDENTIALS לא נמצא. אנא הגדר אותו ב-Streamlit Cloud Secrets."
-        else:
-            error_msg = f"❌ **שגיאת אימות:** {str(e)}"
-        st.session_state.sheet_error = error_msg
-        st.error(error_msg)
-        # Clear cache to retry on next call
+        # Don't access session_state in cached function - just return empty DataFrame
+        # Error handling will be done outside the cached function
         load_data_from_sheet.clear()
         return pd.DataFrame()
     except gspread.exceptions.SpreadsheetNotFound:
-        error_msg = f"❌ **אין גישה לגוגל שיטס:** לא נמצא גיליון בשם '{SHEET_NAME}'. אנא ודא שהגיליון קיים ושם חשבון השירות יש לו גישה אליו."
-        st.session_state.sheet_error = error_msg
-        st.error(error_msg)
+        # Don't access session_state in cached function
         load_data_from_sheet.clear()
         return pd.DataFrame()
     except gspread.exceptions.APIError as e:
-        error_msg = str(e)
-        if "PERMISSION_DENIED" in error_msg or "403" in error_msg:
-            error_msg = f"❌ **אין גישה לגוגל שיטס:** אין הרשאות לגיליון '{SHEET_NAME}'. אנא ודא שחשבון השירות של Google יש לו הרשאות לעריכה בגיליון."
-        elif "401" in error_msg or "UNAUTHENTICATED" in error_msg:
-            error_msg = f"❌ **אין גישה לגוגל שיטס:** האימות נכשל. אנא בדוק את GOOGLE_CREDENTIALS ב-Streamlit Cloud Secrets."
-        else:
-            error_msg = f"❌ **אין גישה לגוגל שיטס:** {error_msg}"
-        st.session_state.sheet_error = error_msg
-        st.error(error_msg)
+        # Don't access session_state in cached function
         load_data_from_sheet.clear()
         return pd.DataFrame()
     except Exception as e:
-        error_type = type(e).__name__
-        error_str = str(e)
-        
-        # Create detailed error message
-        error_msg = f"❌ **שגיאה בטעינת נתונים ({error_type}):** {error_str}"
-        
-        # Add more specific information based on error type
-        if "seekable bit stream" in error_str.lower():
-            error_msg += "\n\n💡 **פתרון אפשרי:** בעיה בפורמט ה-JSON של GOOGLE_CREDENTIALS. ודא שהמשתנה הוא JSON תקין."
-        elif "invalid_grant" in error_str.lower():
-            error_msg += "\n\n💡 **פתרון אפשרי:** האימות נכשל. בדוק שהחשבון השירות פעיל ושהמפתח לא פג תוקף."
-        elif "timeout" in error_str.lower() or "connection" in error_str.lower():
-            error_msg += "\n\n💡 **פתרון אפשרי:** בעיית חיבור ל-Google API. נסה שוב בעוד כמה רגעים."
-        
-        st.session_state.sheet_error = error_msg
-        st.error(error_msg)
-        
-        # Always show detailed traceback
-        import traceback
-        with st.expander("🔍 פרטי שגיאה מפורטים (לפיתוח)"):
-            st.code(traceback.format_exc())
-            st.write("**סוג שגיאה:**", error_type)
-            st.write("**הודעת שגיאה:**", error_str)
-        
+        # Don't access session_state in cached function - error handling done outside
         load_data_from_sheet.clear()
         return pd.DataFrame()
 
