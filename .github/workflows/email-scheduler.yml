@@ -1,0 +1,65 @@
+name: Email Scheduler
+
+on:
+  schedule:
+    # Daily reminder at 10:00 AM Israel time (08:00 UTC)
+    - cron: '0 8 * * *'
+    # Daily sales report at 10:05 AM Israel time (08:05 UTC)
+    - cron: '5 8 * * *'
+    # Daily new orders at 20:00 Israel time (18:00 UTC)
+    - cron: '0 18 * * *'
+    # Weekly sales report on Sunday at 09:00 Israel time (07:00 UTC)
+    - cron: '0 7 * * 0'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  send-emails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run Daily Reminder (10:00 AM)
+        if: github.event.schedule == '0 8 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+        run: |
+          python daily_reminder.py
+      
+      - name: Run Daily Sales Report (10:05 AM)
+        if: github.event.schedule == '5 8 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+        run: |
+          python daily_sales_report.py
+      
+      - name: Run Daily New Orders Report (20:00)
+        if: github.event.schedule == '0 18 * * *' || github.event_name == 'workflow_dispatch'
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+        run: |
+          python daily_new_orders_report.py
+      
+      - name: Run Weekly Sales Report (Sunday 09:00)
+        if: github.event.schedule == '0 7 * * 0' || github.event_name == 'workflow_dispatch'
+        env:
+          GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
+        run: |
+          python weekly_sales_report.py
