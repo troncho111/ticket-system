@@ -1192,65 +1192,9 @@ if mark_paid_order and mark_paid_row and mark_paid_token:
 
 refresh_count = st_autorefresh(interval=AUTO_REFRESH_INTERVAL_MS, limit=None, key="data_autorefresh")
 
-# Email Scheduler Helper Functions
-ISRAEL_TZ = pytz.timezone('Israel')
-
-def check_and_send_scheduled_emails():
-    """Check if it's time to send scheduled emails and send them"""
-    now = datetime.now(ISRAEL_TZ)
-    current_time = now.strftime("%H:%M")
-    current_day = now.strftime("%A").lower()
-    
-    # Get last run times from session state
-    if 'last_email_runs' not in st.session_state:
-        st.session_state.last_email_runs = {}
-    
-    last_runs = st.session_state.last_email_runs
-    today = now.strftime("%Y-%m-%d")
-    
-    # Daily reminder at 10:00 AM
-    if current_time == "10:00" and last_runs.get('daily_reminder') != today:
-        try:
-            from daily_reminder import main
-            main()
-            last_runs['daily_reminder'] = today
-            st.session_state.last_email_runs = last_runs
-        except Exception as e:
-            print(f"Daily reminder error: {e}")
-    
-    # Daily sales report at 10:05 AM
-    if current_time == "10:05" and last_runs.get('daily_sales') != today:
-        try:
-            from daily_sales_report import main
-            main()
-            last_runs['daily_sales'] = today
-            st.session_state.last_email_runs = last_runs
-        except Exception as e:
-            print(f"Daily sales error: {e}")
-    
-    # Daily new orders at 20:00
-    if current_time == "20:00" and last_runs.get('daily_new_orders') != today:
-        try:
-            from daily_new_orders_report import main
-            main()
-            last_runs['daily_new_orders'] = today
-            st.session_state.last_email_runs = last_runs
-        except Exception as e:
-            print(f"Daily new orders error: {e}")
-    
-    # Weekly sales report on Sunday at 09:00
-    if current_day == 'sunday' and current_time == "09:00" and last_runs.get('weekly_sales') != today:
-        try:
-            from weekly_sales_report import main
-            main()
-            last_runs['weekly_sales'] = today
-            st.session_state.last_email_runs = last_runs
-        except Exception as e:
-            print(f"Weekly sales error: {e}")
-
-# Check for scheduled emails (runs on every page load/refresh)
-# Note: This is a workaround - for true automation, you need to run email_scheduler.py separately
-check_and_send_scheduled_emails()
+# Note: Email scheduler needs to run as separate process
+# See EMAIL_SCHEDULER_SETUP.md for setup instructions
+# GitHub Actions workflow is available at .github/workflows/email-scheduler.yml
 
 if 'language' not in st.session_state:
     st.session_state.language = 'he'
@@ -6984,7 +6928,6 @@ with tab7:
                 except Exception as e:
                     st.error(f"שגיאה: {e}")
     
-    st.markdown("---")
     st.markdown("---")
     
     # Email Scheduler Status and Instructions
