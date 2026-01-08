@@ -662,6 +662,37 @@ elif selected_tab == "📦 ניהול ספקים":
     
     st.markdown("---")
     
+    # חיפוש מהיר
+    st.markdown("### 🔍 חיפוש מהיר בטבלה")
+    quick_search = st.text_input(
+        "🔎 חפש בכל העמודות (מספר הזמנה, דוקט, שם אירוע, ספק, וכו'):",
+        placeholder="לדוגמה: Real Madrid או 5498 או goldenseat",
+        key="quick_search_supplier"
+    )
+    
+    # יישום חיפוש מהיר
+    if quick_search and quick_search.strip():
+        search_term = quick_search.strip().lower()
+        search_mask = pd.Series([False] * len(filtered_df), index=filtered_df.index)
+        
+        # חיפוש בכל העמודות הרלוונטיות
+        for col in filtered_df.columns:
+            if col != 'row_index':  # לא לחפש ב-row_index
+                try:
+                    col_mask = filtered_df[col].astype(str).str.lower().str.contains(search_term, na=False, regex=False)
+                    search_mask = search_mask | col_mask
+                except:
+                    pass
+        
+        filtered_df = filtered_df[search_mask]
+        
+        if len(filtered_df) == 0:
+            st.info(f"🔍 לא נמצאו תוצאות עבור: **{quick_search}**")
+        else:
+            st.success(f"🔍 נמצאו **{len(filtered_df)}** תוצאות עבור: **{quick_search}**")
+    
+    st.markdown("---")
+    
     if len(filtered_df) == 0:
         st.warning("לא נמצאו הזמנות התואמות לסינון")
     else:
