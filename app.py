@@ -2075,9 +2075,9 @@ def convert_to_euro(value, rates=None):
         cleaned = re.sub(r'[^\d.\-]', '', value_str)
         return float(cleaned) if cleaned else 0.0
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)  # הגדלנו ל-10 דקות לשפר ביצועים
 def load_data_from_sheet():
-    """Load data from Google Sheet with caching."""
+    """Load data from Google Sheet with caching - OPTIMIZED for performance."""
     try:
         client = get_gspread_client()
         sheet = client.open(SHEET_NAME)
@@ -2100,37 +2100,45 @@ def load_data_from_sheet():
         
         df.columns = [col.strip() for col in df.columns]
         
+        # OPTIMIZED: Build date_hints using vectorized operations instead of iterrows
         date_hints = {}
         if 'Date of the event' in df.columns and 'event name' in df.columns:
-            for _, row in df.iterrows():
-                event = row.get('event name', '')
-                date_val = row.get('Date of the event', '')
-                parsed = parse_date_smart(date_val)
-                if parsed and event and event not in date_hints:
-                    date_hints[event] = parsed
+            # Use vectorized operations - much faster than iterrows
+            event_date_pairs = df[['event name', 'Date of the event']].drop_duplicates(subset=['event name'])
+            for _, row in event_date_pairs.iterrows():
+                event = str(row.get('event name', '')).strip()
+                date_val = str(row.get('Date of the event', '')).strip()
+                if event and date_val:
+                    parsed = parse_date_smart(date_val)
+                    if parsed and event not in date_hints:
+                        date_hints[event] = parsed
         
+        # OPTIMIZED: Use vectorized operations for date parsing
         if 'Date of the event' in df.columns:
-            df['parsed_date'] = df.apply(
-                lambda row: parse_date_smart(
-                    row.get('Date of the event', ''),
-                    row.get('event name', ''),
-                    date_hints
-                ),
-                axis=1
-            )
+            # Create a vectorized version - apply only where needed
+            dates_series = df['Date of the event'].astype(str)
+            events_series = df.get('event name', pd.Series([''] * len(df))).astype(str)
+            
+            # Use list comprehension which is faster than apply for simple operations
+            df['parsed_date'] = [
+                parse_date_smart(dates_series.iloc[i], events_series.iloc[i], date_hints)
+                for i in range(len(df))
+            ]
         
+        # OPTIMIZED: Vectorized operations for numeric conversions
         if 'TOTAL' in df.columns:
-            df['TOTAL_clean'] = df['TOTAL'].apply(convert_to_euro)
+            df['TOTAL_clean'] = df['TOTAL'].map(convert_to_euro)  # map is faster than apply for simple functions
         else:
             df['TOTAL_clean'] = 0.0
             
         if 'SUPP PRICE' in df.columns:
-            df['SUPP_PRICE_clean'] = df['SUPP PRICE'].apply(convert_to_euro)
+            df['SUPP_PRICE_clean'] = df['SUPP PRICE'].map(convert_to_euro)
         else:
             df['SUPP_PRICE_clean'] = 0.0
         
+        # OPTIMIZED: Vectorized commission calculation
         if 'source' in df.columns:
-            df['commission_rate'] = df['source'].apply(get_commission_rate)
+            df['commission_rate'] = df['source'].map(get_commission_rate)
             df['commission_amount'] = df['TOTAL_clean'] * df['commission_rate']
             df['revenue_net'] = df['TOTAL_clean'] - df['commission_amount']
         else:
@@ -2138,12 +2146,12 @@ def load_data_from_sheet():
             df['commission_amount'] = 0.0
             df['revenue_net'] = df['TOTAL_clean']
         
+        # OPTIMIZED: Vectorized profit and margin calculations
         df['profit'] = df['revenue_net'] - df['SUPP_PRICE_clean']
         df['profit_before_commission'] = df['TOTAL_clean'] - df['SUPP_PRICE_clean']
-        df['margin_pct'] = df.apply(
-            lambda row: (row['profit'] / row['revenue_net'] * 100) if row['revenue_net'] > 0 else 0,
-            axis=1
-        )
+        # Vectorized margin calculation - much faster than apply
+        df['margin_pct'] = (df['profit'] / df['revenue_net'] * 100).fillna(0)
+        df.loc[df['revenue_net'] <= 0, 'margin_pct'] = 0
         
         status_col = 'orderd' if 'orderd' in df.columns else ('Status' if 'Status' in df.columns else None)
         if status_col:
@@ -2159,9 +2167,14 @@ def load_data_from_sheet():
                 '💚 נשלח ושולם': 'sent - paid',
                 'נשלח ושולם': 'sent - paid',
             }
-            df[status_col] = df[status_col].apply(
-                lambda x: hebrew_to_english_status.get(str(x).strip(), x) if pd.notna(x) else x
-            )
+            # OPTIMIZED: Use map instead of apply for simple dictionary lookup
+            df[status_col] = df[status_col].astype(str).str.strip().map(
+                lambda x: hebrew_to_english_status.get(x, x) if x else x
+            ).fillna(df[status_col])
+        
+        # OPTIMIZED: Calculate has_supplier_data once during load instead of multiple times
+        # This avoids repeated apply() calls throughout the app
+        df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
         
         # Clear any previous error state on successful load
         if 'sheet_error' in st.session_state:
@@ -3998,7 +4011,10 @@ if df.empty:
 now = datetime.now()
 status_col = 'orderd' if 'orderd' in df.columns else None
 
-df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
+# OPTIMIZED: has_supplier_data is already calculated in load_data_from_sheet()
+# Only calculate if missing (for backward compatibility)
+if 'has_supplier_data' not in df.columns:
+    df['has_supplier_data'] = df.apply(has_supplier_data, axis=1)
 
 supp_name_col = 'Supplier NAME' if 'Supplier NAME' in df.columns else None
 supp_order_col = None
