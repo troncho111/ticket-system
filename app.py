@@ -1987,25 +1987,39 @@ def add_missing_orders_simple():
         import traceback
         st.code(traceback.format_exc())
 
+# Cache for parsed dates to avoid re-parsing same strings
+_date_parse_cache = {}
+
 def parse_date_smart(date_str, event_name=None, date_hints=None):
-    """Smart date parser that handles multiple formats."""
+    """Smart date parser that handles multiple formats - OPTIMIZED with caching."""
     if pd.isna(date_str) or date_str == '' or date_str is None:
         return None
     
     date_str = str(date_str).strip()
     
+    # Check cache first (significant speedup for repeated dates)
+    if date_str in _date_parse_cache:
+        return _date_parse_cache[date_str]
+    
+    # Check hints first (fastest path)
+    if date_hints and event_name and event_name in date_hints:
+        result = date_hints[event_name]
+        _date_parse_cache[date_str] = result
+        return result
+    
+    # Try most common formats first (optimization: order by frequency)
     formats = [
+        "%d/%m/%Y",      # Most common: DD/MM/YYYY
+        "%Y-%m-%d",      # ISO format
+        "%d/%m/%Y %H:%M", # With time
+        "%m/%d/%Y",      # US format
+        "%d-%m-%Y",      # Dash format
+        "%Y-%m-%d %H:%M:%S",
         "%m/%d/%Y %H:%M",
         "%m/%d/%Y %H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d %H:%M",
-        "%d/%m/%Y %H:%M",
         "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y",
-        "%d-%m-%Y",
-        "%Y-%m-%d",
         "%d.%m.%Y",
-        "%m/%d/%Y",
         "%d/%m/%y",
         "%d-%m-%y",
         "%Y/%m/%d",
@@ -2013,13 +2027,14 @@ def parse_date_smart(date_str, event_name=None, date_hints=None):
     
     for fmt in formats:
         try:
-            return datetime.strptime(date_str, fmt)
+            result = datetime.strptime(date_str, fmt)
+            _date_parse_cache[date_str] = result  # Cache successful parse
+            return result
         except ValueError:
             continue
     
-    if date_hints and event_name and event_name in date_hints:
-        return date_hints[event_name]
-    
+    # Cache None to avoid re-trying failed parses
+    _date_parse_cache[date_str] = None
     return None
 
 def clean_numeric(value):
@@ -2052,25 +2067,37 @@ def get_exchange_rates():
     except Exception as e:
         return {'GBP': 1.18, 'USD': 0.93}
 
+# Cache for exchange rates to avoid repeated API calls
+_exchange_rates_cache = None
+_exchange_rates_cache_time = None
+
 def convert_to_euro(value, rates=None):
-    """המר כל מטבע לאירו עם שערים אמיתיים"""
+    """המר כל מטבע לאירו עם שערים אמיתיים - OPTIMIZED with caching"""
     if pd.isna(value) or value == '' or value is None:
         return 0.0
     
+    # Get rates with caching (avoid repeated API calls)
     if rates is None:
-        rates = get_exchange_rates()
+        global _exchange_rates_cache, _exchange_rates_cache_time
+        now = time.time()
+        # Cache rates for 1 hour
+        if _exchange_rates_cache is None or _exchange_rates_cache_time is None or (now - _exchange_rates_cache_time) > 3600:
+            _exchange_rates_cache = get_exchange_rates()
+            _exchange_rates_cache_time = now
+        rates = _exchange_rates_cache
     
     value_str = str(value).strip()
     
+    # Fast path: EUR (most common)
     if '€' in value_str:
         cleaned = re.sub(r'[^\d.\-]', '', value_str)
         return float(cleaned) if cleaned else 0.0
     elif '£' in value_str:
         cleaned = re.sub(r'[^\d.\-]', '', value_str)
-        return (float(cleaned) if cleaned else 0.0) * rates['GBP']
+        return (float(cleaned) if cleaned else 0.0) * rates.get('GBP', 1.18)
     elif '$' in value_str:
         cleaned = re.sub(r'[^\d.\-]', '', value_str)
-        return (float(cleaned) if cleaned else 0.0) * rates['USD']
+        return (float(cleaned) if cleaned else 0.0) * rates.get('USD', 0.93)
     else:
         cleaned = re.sub(r'[^\d.\-]', '', value_str)
         return float(cleaned) if cleaned else 0.0
@@ -2100,30 +2127,47 @@ def load_data_from_sheet():
         
         df.columns = [col.strip() for col in df.columns]
         
-        # OPTIMIZED: Build date_hints using vectorized operations instead of iterrows
+        # OPTIMIZED: Build date_hints using vectorized operations - NO iterrows!
         date_hints = {}
         if 'Date of the event' in df.columns and 'event name' in df.columns:
-            # Use vectorized operations - much faster than iterrows
-            event_date_pairs = df[['event name', 'Date of the event']].drop_duplicates(subset=['event name'])
-            for _, row in event_date_pairs.iterrows():
-                event = str(row.get('event name', '')).strip()
-                date_val = str(row.get('Date of the event', '')).strip()
-                if event and date_val:
-                    parsed = parse_date_smart(date_val)
-                    if parsed and event not in date_hints:
-                        date_hints[event] = parsed
+            # Use vectorized operations - extract unique pairs without iterrows
+            event_date_df = df[['event name', 'Date of the event']].drop_duplicates(subset=['event name'])
+            # Convert to dict for fast lookup - much faster than iterrows
+            event_date_dict = dict(zip(
+                event_date_df['event name'].astype(str).str.strip(),
+                event_date_df['Date of the event'].astype(str).str.strip()
+            ))
+            # Build hints dict using dict comprehension - faster than loop
+            date_hints = {
+                event: parse_date_smart(date_val)
+                for event, date_val in event_date_dict.items()
+                if event and date_val and parse_date_smart(date_val)
+            }
         
-        # OPTIMIZED: Use vectorized operations for date parsing
+        # OPTIMIZED: Use pd.to_datetime first (fastest), fallback to parse_date_smart only when needed
         if 'Date of the event' in df.columns:
-            # Create a vectorized version - apply only where needed
-            dates_series = df['Date of the event'].astype(str)
-            events_series = df.get('event name', pd.Series([''] * len(df))).astype(str)
+            dates_series = df['Date of the event'].astype(str).str.strip()
+            events_series = df.get('event name', pd.Series([''] * len(df))).astype(str).str.strip()
             
-            # Use list comprehension which is faster than apply for simple operations
-            df['parsed_date'] = [
-                parse_date_smart(dates_series.iloc[i], events_series.iloc[i], date_hints)
-                for i in range(len(df))
-            ]
+            # Try pd.to_datetime first (very fast for standard formats)
+            try:
+                parsed_dates = pd.to_datetime(dates_series, errors='coerce', infer_datetime_format=True)
+                # Fill missing dates using hints
+                missing_mask = parsed_dates.isna()
+                if missing_mask.any() and date_hints:
+                    for idx in dates_series[missing_mask].index:
+                        event = events_series.iloc[idx] if idx < len(events_series) else ''
+                        if event in date_hints:
+                            parsed_dates.iloc[idx] = date_hints[event]
+                df['parsed_date'] = parsed_dates
+            except:
+                # Fallback to parse_date_smart only for failed dates
+                # Use vectorized approach with minimal function calls
+                df['parsed_date'] = pd.Series([
+                    date_hints.get(events_series.iloc[i], None) if events_series.iloc[i] in date_hints
+                    else parse_date_smart(dates_series.iloc[i], events_series.iloc[i], date_hints)
+                    for i in range(len(df))
+                ], index=df.index)
         
         # OPTIMIZED: Vectorized operations for numeric conversions
         if 'TOTAL' in df.columns:
@@ -4026,17 +4070,23 @@ for col in df.columns:
 week_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 week_end = week_start + timedelta(days=7)
 
+# OPTIMIZED: Pre-filter and cache status column for faster lookups
+status_series = df[status_col].fillna('').astype(str).str.lower().str.strip() if status_col else pd.Series([], dtype=str)
+has_supplier_mask = df['has_supplier_data'] == True if 'has_supplier_data' in df.columns else pd.Series([False] * len(df))
+
+# OPTIMIZED: Vectorized calculations - much faster than multiple filters
 total_orders = len(df)
-total_tickets = pd.to_numeric(df.get('Qty', 0), errors='coerce').sum()
-total_sales = df['TOTAL_clean'].sum()
-total_supp_cost = df[df['has_supplier_data'] == True]['SUPP_PRICE_clean'].sum()
-total_profit = df[df['has_supplier_data'] == True]['profit'].sum()
+total_tickets = pd.to_numeric(df.get('Qty', pd.Series([0] * len(df))), errors='coerce').sum()
+total_sales = df['TOTAL_clean'].sum() if 'TOTAL_clean' in df.columns else 0.0
+total_supp_cost = df.loc[has_supplier_mask, 'SUPP_PRICE_clean'].sum() if 'SUPP_PRICE_clean' in df.columns else 0.0
+total_profit = df.loc[has_supplier_mask, 'profit'].sum() if 'profit' in df.columns else 0.0
 profit_pct = (total_profit / total_sales * 100) if total_sales > 0 else 0
 
-new_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'new']) if status_col else 0
-orderd_count = len(df[df[status_col].fillna('').str.lower().str.strip() == 'orderd']) if status_col else 0
-done_count = len(df[df[status_col].fillna('').str.lower().str.strip().isin(['done!', 'done'])]) if status_col else 0
-needs_attention = len(df[(df['has_supplier_data'] == False) & (df[status_col].fillna('').str.lower().str.strip() == 'new')]) if status_col else 0
+# OPTIMIZED: Use pre-computed status_series instead of repeated filtering
+new_count = (status_series == 'new').sum() if status_col else 0
+orderd_count = (status_series == 'orderd').sum() if status_col else 0
+done_count = status_series.isin(['done!', 'done']).sum() if status_col else 0
+needs_attention = ((~has_supplier_mask) & (status_series == 'new')).sum() if status_col else 0
 
 if 'dashboard_filter' not in st.session_state:
     st.session_state.dashboard_filter = None
